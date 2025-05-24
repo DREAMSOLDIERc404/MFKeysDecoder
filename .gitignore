@@ -1,0 +1,10 @@
+# ignore the __pycache__ folder and all its contents
+__pycache__/
+.vscode/
+.metals/
+.bloop/
+.gradle/
+build/
+bin/
+DUMPS/*
+!DUMPS/.put-here-your-dumps
