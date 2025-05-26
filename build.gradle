@@ -11,5 +11,5 @@ dependencies {
 }
 
 application {
-    mainClass = 'Main'
+    mainClass = 'com.mfkeysdecoder.Main'
 }

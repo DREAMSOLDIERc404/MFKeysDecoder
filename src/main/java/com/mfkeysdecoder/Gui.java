@@ -1,3 +1,6 @@
+package com.mfkeysdecoder;
+
+import com.mfkeysdecoder.ALGOS.*;
 import javax.swing.*;
 import javax.swing.table.*;
 import java.awt.*;

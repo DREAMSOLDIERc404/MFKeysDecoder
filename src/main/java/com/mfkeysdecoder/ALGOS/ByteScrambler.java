@@ -1,3 +1,5 @@
+package com.mfkeysdecoder.ALGOS;
+
 import java.util.*;
 import java.util.function.BinaryOperator;
 

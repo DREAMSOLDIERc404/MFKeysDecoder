@@ -1,6 +1,7 @@
+package com.mfkeysdecoder.ALGOS;
+
 // HiddenXORFinder.java
 import java.util.*;
-import java.util.stream.Collectors;
 
 public class HiddenXORFinder {
     private static final List<Integer> keyBytes = new ArrayList<>();
