@@ -397,7 +397,7 @@ public class Gui extends JFrame {
                 // Logica esistente per ByteScrambler
                 List<String> ops = (List<String>) cand.get("ops");
                 List<Integer> results = (List<Integer>) cand.get("results");
-
+                if (results == null) continue;  // Skip entry non valida
                 StringBuilder opBuilder = new StringBuilder();
                 for (int i = 0; i < operands.length; i++) {
                     if (i > 0) opBuilder.append(" ").append(ops.get(i - 1)).append(" ");

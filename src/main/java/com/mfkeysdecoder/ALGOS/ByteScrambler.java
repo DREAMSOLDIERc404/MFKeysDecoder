@@ -182,11 +182,12 @@ public class ByteScrambler {
                             continue;
                         }
 
-                        boolean isValid = processCombination(opCombo, negPattern, revPattern, functionList);
+                        List<Integer> results = new ArrayList<>();
+                        boolean isValid = processCombination(opCombo, negPattern, revPattern, functionList, results);
                         operationCache.put(keyHash, isValid);
 
                         if (isValid) {
-                            addCandidateToMap(opCombo, negPattern, revPattern, functionNames);
+                            addCandidateToMap(opCombo, negPattern, revPattern, functionNames, results);
                         }
 
                         int current = progress.incrementAndGet();
@@ -199,7 +200,8 @@ public class ByteScrambler {
         }
 
         private boolean processCombination(List<Integer> opCombo, List<Boolean> negPattern,
-                                          List<Boolean> revPattern, List<BinaryOperator<Integer>> functionList) {
+                                          List<Boolean> revPattern, List<BinaryOperator<Integer>> functionList,
+                                          List<Integer> results) {
             List<BinaryOperator<Integer>> ops = new ArrayList<>();
             for (int idx : opCombo) {
                 ops.add(functionList.get(idx));
@@ -207,7 +209,6 @@ public class ByteScrambler {
 
             Set<Integer> commonIndices = null;
             boolean valid = true;
-            List<Integer> results = new ArrayList<>();
 
             for (int[] dump : dumps) {
                 int res = evaluateExpression(
@@ -255,11 +256,13 @@ public class ByteScrambler {
         }
 
         private void addCandidateToMap(List<Integer> opCombo, List<Boolean> negPattern,
-                                      List<Boolean> revPattern, List<String> functionNames) {
+                                      List<Boolean> revPattern, List<String> functionNames,
+                                      List<Integer> results) {
             Map<String, Object> cand = new HashMap<>();
             cand.put("operands", operandIndices.clone());
             cand.put("negations", new ArrayList<>(negPattern));
             cand.put("reverses", new ArrayList<>(revPattern));
+            cand.put("results", new ArrayList<>(results));
 
             List<String> opNames = new ArrayList<>();
             for (int idx : opCombo) {
@@ -267,25 +270,41 @@ public class ByteScrambler {
             }
             cand.put("ops", opNames);
 
-            int commonIndex = findCommonIndex();
-            cand.put("result_index", commonIndex);
+            Set<Integer> commonIndices = new HashSet<>();
+            for (int[] dump : dumps) {
+                Set<Integer> currentMatches = new HashSet<>();
+                for (int k = 0; k < dump.length; k++) {
+                    boolean isOperand = false;
+                    for (int idx : operandIndices) {
+                        if (k == idx) {
+                            isOperand = true;
+                            break;
+                        }
+                    }
+                    if (!isOperand && dump[k] == results.get(dumps.indexOf(dump))) {
+                        currentMatches.add(k);
+                    }
+                }
+                if (commonIndices.isEmpty()) {
+                    commonIndices.addAll(currentMatches);
+                } else {
+                    commonIndices.retainAll(currentMatches);
+                }
+            }
 
-            candidateByResult.computeIfAbsent(commonIndex, k -> Collections.synchronizedList(new ArrayList<>()))
-                    .add(cand);
+            if (!commonIndices.isEmpty()) {
+                cand.put("result_index", Collections.min(commonIndices));
+                candidateByResult.computeIfAbsent(Collections.min(commonIndices), k -> Collections.synchronizedList(new ArrayList<>()))
+                        .add(cand);
+            }
         }
 
         private void addCachedCandidate(int keyHash) {
-            // Implement logic to retrieve cached candidate if needed
-            // (This would require additional caching structures)
-        }
-
-        private int findCommonIndex() {
-            // Simplified for brevity. Actual logic should compute the common index.
-            return operandIndices[0];
+            // Implementazione per recuperare candidati dalla cache se necessario
         }
     }
 
-    // Utility methods
+    // Utility methods rimangono invariati
     private static List<int[]> combinations(int n, int r) {
         List<int[]> result = new ArrayList<>();
         combinationHelper(result, new int[r], 0, n - 1, 0);
