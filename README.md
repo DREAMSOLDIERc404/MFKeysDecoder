@@ -97,7 +97,7 @@ Sentiti libero di utilizzarlo, modificarlo e condividerlo!
 
 ## DA AGGIUNGERE
 
-- In XORFinder bisogna estendere i dump in omdo che abbiano anche i byte negati, specchiati ecc.
+- In bytescrambler bisogna risolvere l'errore dei tre o più operandi
 - Controllo dei dump per vedere che siano gli stessi e che abbiano stessa lunghezza
 - Possbilità di selezionare la lunghezza delle righe (default=16 ma puo cambiare)
 - tasto indietro per tornare alla selezione degli algoritmi
