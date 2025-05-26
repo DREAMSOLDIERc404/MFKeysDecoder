@@ -1,6 +1,8 @@
 package com.mfkeysdecoder.ALGOS;
 
 import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BinaryOperator;
 
 public class ByteScrambler {
@@ -20,6 +22,7 @@ public class ByteScrambler {
         candidateFunctions.put("SHIFT_XOR", (a, b) -> ((a << 2) & 0xFF) ^ b);
         candidateFunctions.put("BLEND", (a, b) -> ((a & 0xF0) | (b & 0x0F)));
     }
+
     public static int reverseNibble(int b) {
         return ((b & 0x0F) << 4) | (b >> 4);
     }
@@ -44,117 +47,204 @@ public class ByteScrambler {
         return result;
     }
 
-    // Traduzione fedele della candidate_search_thread di calculation.py
-         public static Map<Integer, List<Map<String, Object>>> searchCandidates(
-        List<int[]> dumps,
-        int maxOperands,
-        ProgressCallback progressCallback
-    ) {
+    public static Map<Integer, List<Map<String, Object>>> searchCandidates(
+            List<int[]> dumps,
+            int maxOperands,
+            ProgressCallback progressCallback
+    ) throws InterruptedException {
 
         int n = dumps.get(0).length;
-        Map<Integer, List<Map<String, Object>>> candidateByResult = new HashMap<>();
+        Map<Integer, List<Map<String, Object>>> candidateByResult = new ConcurrentHashMap<>();
+        AtomicInteger progress = new AtomicInteger(0);
+        long total = calculateTotalCombinations(n, maxOperands);
+        
+        if (total == Long.MAX_VALUE) {
+            progressCallback.handleOverflow(); // Nuovo metodo per overflow
+            throw new IllegalArgumentException("Troppe combinazioni per essere calcolate senza overflow.");
+        }
 
-        // Calcolo totale combinazioni (per progress bar)
+        ExecutorService executor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
+        List<Future<?>> futures = new ArrayList<>();
+
+        for (int numOperands = 1; numOperands <= maxOperands; numOperands++) {
+            final int currentNumOperands = numOperands;
+            List<int[]> operandCombinations = combinations(n, numOperands);
+            
+            for (int[] operandIndices : operandCombinations) {
+                futures.add(executor.submit(new CandidateTask(
+                        dumps, operandIndices, currentNumOperands,
+                        candidateByResult, progress, total, progressCallback
+                )));
+            }
+        }
+
+        for (Future<?> future : futures) {
+            try {
+                future.get();
+            } catch (ExecutionException e) {
+                throw new RuntimeException("Error during candidate search", e.getCause());
+            }
+        }
+        executor.shutdown();
+        executor.awaitTermination(1, TimeUnit.HOURS);
+
+        progressCallback.update(total, total);
+        return new HashMap<>(candidateByResult);
+    }
+
+    private static long calculateTotalCombinations(int n, int maxOperands) {
         long total = 0;
         for (int numOperands = 1; numOperands <= maxOperands; numOperands++) {
             long combOperands = binomial(n, numOperands);
             long negationComb = 1L << numOperands;
             long reverseComb = (numOperands == 1) ? 2 : 1L << (numOperands - 1);
             long opComb = (numOperands > 1) ? (long) Math.pow(candidateFunctions.size(), numOperands - 1) : 1;
-            total += combOperands * negationComb * reverseComb * opComb;
+    
+            // Controllo overflow per: combOperands * negationComb
+            long product = safeMultiply(combOperands, negationComb);
+            if (product < 0) return Long.MAX_VALUE;
+    
+            // Controllo overflow per: product * reverseComb
+            product = safeMultiply(product, reverseComb);
+            if (product < 0) return Long.MAX_VALUE;
+    
+            // Controllo overflow per: product * opComb
+            product = safeMultiply(product, opComb);
+            if (product < 0) return Long.MAX_VALUE;
+    
+            // Controllo overflow per: total += product
+            if (Long.MAX_VALUE - total < product) {
+                return Long.MAX_VALUE;
+            }
+            total += product;
+        }
+        return total;
+    }
+    
+    // Metodo helper per moltiplicazione sicura
+    private static long safeMultiply(long a, long b) {
+        if (a != 0 && b != 0 && (a * b) / a != b) {
+            return -1; // Overflow
+        }
+        return a * b;
+    }
+
+    static class CandidateTask implements Runnable {
+        private final List<int[]> dumps;
+        private final int[] operandIndices;
+        private final int numOperands;
+        private final Map<Integer, List<Map<String, Object>>> candidateByResult;
+        private final AtomicInteger progress;
+        private final long total;
+        private final ProgressCallback progressCallback;
+
+        CandidateTask(List<int[]> dumps, int[] operandIndices, int numOperands,
+                     Map<Integer, List<Map<String, Object>>> candidateByResult,
+                     AtomicInteger progress, long total, ProgressCallback progressCallback) {
+            this.dumps = dumps;
+            this.operandIndices = operandIndices;
+            this.numOperands = numOperands;
+            this.candidateByResult = candidateByResult;
+            this.progress = progress;
+            this.total = total;
+            this.progressCallback = progressCallback;
         }
 
-        long count = 0;
-        List<String> functionNames = new ArrayList<>(candidateFunctions.keySet());
-        List<BinaryOperator<Integer>> functionList = new ArrayList<>(candidateFunctions.values());
+        @Override
+        public void run() {
+            List<String> functionNames = new ArrayList<>(candidateFunctions.keySet());
+            List<BinaryOperator<Integer>> functionList = new ArrayList<>(candidateFunctions.values());
+            int numOps = numOperands - 1;
 
-        for (int numOperands = 1; numOperands <= maxOperands; numOperands++) {
-            List<int[]> operandCombinations = combinations(n, numOperands);
-            for (int[] operandIndices : operandCombinations) {
-                int numOps = numOperands - 1;
-                List<List<Integer>> opCombos = (numOps == 0)
-                        ? Collections.singletonList(Collections.emptyList())
-                        : product(functionNames.size(), numOps);
+            List<List<Integer>> opCombos = (numOps == 0)
+                    ? Collections.singletonList(Collections.emptyList())
+                    : product(functionNames.size(), numOps);
 
-                for (List<Integer> opCombo : opCombos) {
-                    List<List<Boolean>> negationPatterns = productBoolean(numOperands);
-                    for (List<Boolean> negPattern : negationPatterns) {
-                        List<List<Boolean>> reversePatterns =
-                                (numOperands == 1)
-                                        ? productBoolean(1)
-                                        : productFixedFirstTrue(numOperands);
+            for (List<Integer> opCombo : opCombos) {
+                List<List<Boolean>> negationPatterns = productBoolean(numOperands);
+                for (List<Boolean> negPattern : negationPatterns) {
+                    List<List<Boolean>> reversePatterns =
+                            (numOperands == 1)
+                                    ? productBoolean(1)
+                                    : productFixedFirstTrue(numOperands);
 
-                        for (List<Boolean> revPattern : reversePatterns) {
-                            count++;
-                            if (count % 100 == 0) {
-                                progressCallback.update((int) count, (int) total);
-                            }
-                            List<BinaryOperator<Integer>> ops = new ArrayList<>();
-                            List<String> opNames = new ArrayList<>();
-                            for (int idx : opCombo) {
-                                ops.add(functionList.get(idx));
-                                opNames.add(functionNames.get(idx));
-                            }
-                            List<Integer> results = new ArrayList<>();
-                            Set<Integer> commonIndices = null;
-                            boolean valid = true;
-
-                            for (int[] dump : dumps) {
-                                int res = evaluateExpression(
-                                        dump,
-                                        operandIndices,
-                                        toPrimitive(negPattern),
-                                        toPrimitive(revPattern),
-                                        ops
-                                );
-                                results.add(res);
-                                Set<Integer> currentMatches = new HashSet<>();
-                                for (int k = 0; k < dump.length; k++) {
-                                    boolean inOperands = false;
-                                    for (int val : operandIndices)
-                                        if (k == val) inOperands = true;
-                                    if (!inOperands && dump[k] == res) currentMatches.add(k);
-                                }
-                                if (currentMatches.isEmpty()) {
-                                    valid = false;
-                                    break;
-                                }
-                                if (commonIndices == null)
-                                    commonIndices = currentMatches;
-                                else
-                                    commonIndices.retainAll(currentMatches);
-
-                                if (commonIndices.isEmpty()) {
-                                    valid = false;
-                                    break;
-                                }
-                            }
-                            if (!valid || commonIndices == null || commonIndices.isEmpty())
-                                continue;
-                            Set<Integer> uniqueResults = new HashSet<>(results);
-                            if (uniqueResults.size() == 1) continue;
-                            int commonIndex = Collections.min(commonIndices);
-
-                            // Build candidate info
-                            Map<String, Object> cand = new HashMap<>();
-                            cand.put("operands", operandIndices.clone());
-                            cand.put("negations", new ArrayList<>(negPattern));
-                            cand.put("reverses", new ArrayList<>(revPattern));
-                            cand.put("ops", new ArrayList<>(opNames));
-                            cand.put("results", new ArrayList<>(results));
-                            cand.put("result_index", commonIndex);
-
-                            candidateByResult.computeIfAbsent(commonIndex, k -> new ArrayList<>()).add(cand);
+                    for (List<Boolean> revPattern : reversePatterns) {
+                        processCombination(opCombo, negPattern, revPattern, functionNames, functionList);
+                        int current = progress.incrementAndGet();
+                        if (current % 100 == 0) {
+                            progressCallback.update(current, total);
                         }
                     }
                 }
             }
         }
-        progressCallback.update((int) total, (int) total);
-        return candidateByResult;
+
+        private void processCombination(List<Integer> opCombo, List<Boolean> negPattern,
+                                        List<Boolean> revPattern, List<String> functionNames,
+                                        List<BinaryOperator<Integer>> functionList) {
+            List<BinaryOperator<Integer>> ops = new ArrayList<>();
+            List<String> opNames = new ArrayList<>();
+            for (int idx : opCombo) {
+                ops.add(functionList.get(idx));
+                opNames.add(functionNames.get(idx));
+            }
+
+            List<Integer> results = new ArrayList<>();
+            Set<Integer> commonIndices = null;
+            boolean valid = true;
+
+            for (int[] dump : dumps) {
+                int res = evaluateExpression(
+                        dump,
+                        operandIndices,
+                        toPrimitive(negPattern),
+                        toPrimitive(revPattern),
+                        ops
+                );
+                results.add(res);
+                Set<Integer> currentMatches = new HashSet<>();
+                for (int k = 0; k < dump.length; k++) {
+                    boolean inOperands = false;
+                    for (int val : operandIndices)
+                        if (k == val) inOperands = true;
+                    if (!inOperands && dump[k] == res) currentMatches.add(k);
+                }
+                if (currentMatches.isEmpty()) {
+                    valid = false;
+                    break;
+                }
+                if (commonIndices == null)
+                    commonIndices = new HashSet<>(currentMatches);
+                else
+                    commonIndices.retainAll(currentMatches);
+
+                if (commonIndices.isEmpty()) {
+                    valid = false;
+                    break;
+                }
+            }
+
+            if (!valid || commonIndices == null || commonIndices.isEmpty())
+                return;
+
+            Set<Integer> uniqueResults = new HashSet<>(results);
+            if (uniqueResults.size() == 1) return;
+            int commonIndex = Collections.min(commonIndices);
+
+            Map<String, Object> cand = new HashMap<>();
+            cand.put("operands", operandIndices.clone());
+            cand.put("negations", new ArrayList<>(negPattern));
+            cand.put("reverses", new ArrayList<>(revPattern));
+            cand.put("ops", new ArrayList<>(opNames));
+            cand.put("results", new ArrayList<>(results));
+            cand.put("result_index", commonIndex);
+
+            candidateByResult.computeIfAbsent(commonIndex, k -> Collections.synchronizedList(new ArrayList<>()))
+                    .add(cand);
+        }
     }
 
-    // Utility methods: combinations, binomial, product, productBoolean, etc.
+    // Utility methods rimangono identici
     private static List<int[]> combinations(int n, int r) {
         List<int[]> result = new ArrayList<>();
         combinationHelper(result, new int[r], 0, n - 1, 0);
@@ -246,6 +336,7 @@ public class ByteScrambler {
     }
 
     public interface ProgressCallback {
-        void update(int current, int total);
+        void update(long current, long total); // Usa long invece di int
+        default void handleOverflow() {}
     }
 }

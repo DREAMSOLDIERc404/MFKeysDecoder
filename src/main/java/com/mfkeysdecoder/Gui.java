@@ -159,22 +159,31 @@ public class Gui extends JFrame {
     }
 
     private void startCalculation() {
-        if("ByteScrambler".equals(selectedAlgorithm)) {
-            candidateByResult = ByteScrambler.searchCandidates(dumps, maxOperands, (current, total) -> {
-                int percent = (int) ((current / (double) total) * 100);
-                SwingUtilities.invokeLater(() -> {
-                    progressBar.setValue(percent);
-                    progressLabel.setText(String.format("Calcolo in corso... %d%%", percent));
+        try {
+            if ("ByteScrambler".equals(selectedAlgorithm)) {
+                candidateByResult = ByteScrambler.searchCandidates(dumps, maxOperands, (current, total) -> {
+                    int percent = (int) ((current / (double) total) * 100);
+                    SwingUtilities.invokeLater(() -> {
+                        progressBar.setValue(percent);
+                        progressLabel.setText(String.format("Calcolo in corso... %d%%", percent));
+                    });
                 });
-            });
-        } else if ("HiddenXORFinder".equals(selectedAlgorithm)) {
-            candidateByResult = HiddenXORFinder.searchCandidates(dumps, (current, total) -> { // Rimosso maxOperands
-                int percent = (int) ((current / (double) total) * 100);
-                SwingUtilities.invokeLater(() -> {
-                    progressBar.setValue(percent);
-                    progressLabel.setText(String.format("Calcolo in corso... %d%%", percent));
+            } else if ("HiddenXORFinder".equals(selectedAlgorithm)) {
+                candidateByResult = HiddenXORFinder.searchCandidates(dumps, (current, total) -> {
+                    int percent = (int) ((current / (double) total) * 100);
+                    SwingUtilities.invokeLater(() -> {
+                        progressBar.setValue(percent);
+                        progressLabel.setText(String.format("Calcolo in corso... %d%%", percent));
+                    });
                 });
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt(); // Restore interrupted status
+            SwingUtilities.invokeLater(() -> {
+                JOptionPane.showMessageDialog(this, "Calculation interrupted", "Error", JOptionPane.ERROR_MESSAGE);
+                // Optionally revert UI to a previous state
             });
+            return;
         }
         SwingUtilities.invokeLater(this::buildMainUI);
     }
