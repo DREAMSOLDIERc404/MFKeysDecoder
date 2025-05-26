@@ -98,6 +98,7 @@ Sentiti libero di utilizzarlo, modificarlo e condividerlo!
 ## DA AGGIUNGERE
 
 - In bytescrambler bisogna renderlo più efficente e veloce da gestire almeno 3 operandi
+- Da correggere il fatto che la lista candidati è molto più vuota (risolvere bug)
 - Meccanica di salvataggio progresso sennò uno dopo 2 ore di attesa magari chiude  e perde tutto.
 - Aggiungere un ETA al loading ("Estimated Time of Arrival", ovvero "Orario di arrivo previsto")
 - Possbilità di selezionare la lunghezza delle righe (default=16 ma puo cambiare)
