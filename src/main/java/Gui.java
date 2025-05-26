@@ -347,48 +347,72 @@ public class Gui extends JFrame {
 
         for (Map<String, Object> cand : candidates) {
             int[] operands = (int[]) cand.get("operands");
-            List<String> ops = (List<String>) cand.get("ops");
-            List<Integer> results = (List<Integer>) cand.get("results");
+            List<Boolean> negations = (List<Boolean>) cand.get("negations");
+            List<Boolean> reverses = (List<Boolean>) cand.get("reverses");
+            int resultIndex = (int) cand.get("result_index");
 
-            // CONTROLLO ALGORITMO
             if ("HiddenXORFinder".equals(selectedAlgorithm)) {
-                // Logica specifica per HiddenXORFinder (chiave in rosso)
-                int keyIndex = operands[1];
-                Integer commonN = HiddenXORFinder.getKeyFromIndex(keyIndex);
+                // Calcola i byte trasformati per entrambi gli operandi
+                int originalI = currentDump[operands[0]];
+                int originalJ = currentDump[operands[1]];
+
+                boolean negateI = negations.get(0);
+                boolean reverseI = reverses.get(0);
+                int transformedI = transformByte(originalI, reverseI, negateI);
+                String formattedI = (negateI ? "!" : "") + String.format("%02X", transformedI);
+
+                boolean negateJ = negations.get(1);
+                boolean reverseJ = reverses.get(1);
+                int transformedJ = transformByte(originalJ, reverseJ, negateJ);
+                String formattedJ = (negateJ ? "!" : "") + String.format("%02X", transformedJ);
+
+                // Ottieni la chiave comune
+                Integer commonN = HiddenXORFinder.getKeyFromIndex(resultIndex);
                 String keyStr = (commonN != null) ? String.format("%02X", commonN) : "??";
+
+                // Costruisci la stringa dell'operazione
                 String operation = String.format(
-                    "<html>%02X <font color='red'>XOR %s</font> = %02X</html>",
-                    currentDump[operands[0]], keyStr, results.get(currentDumpIndex)
+                    "<html>%s XOR %s, KEY: <font color='red'>%s</font></html>",
+                    formattedI, formattedJ, keyStr
                 );
+
                 tableModel.addRow(new Object[]{
                     Arrays.toString(operands),
-                    cand.get("result_index"),
+                    resultIndex,
                     operation
                 });
             } else {
-                // Logica per ByteScrambler (con negazioni)
-                StringBuilder opBuilder = new StringBuilder();
-                List<Boolean> negations = (List<Boolean>) cand.get("negations");
+                // Logica esistente per ByteScrambler
+                List<String> ops = (List<String>) cand.get("ops");
+                List<Integer> results = (List<Integer>) cand.get("results");
 
+                StringBuilder opBuilder = new StringBuilder();
                 for (int i = 0; i < operands.length; i++) {
                     if (i > 0) opBuilder.append(" ").append(ops.get(i - 1)).append(" ");
-                    
-                    // Aggiungi '!' se la negazione è true
                     if (negations != null && i < negations.size() && negations.get(i)) {
                         opBuilder.append("!");
                     }
-                    
                     opBuilder.append(String.format("%02X", currentDump[operands[i]]));
                 }
                 opBuilder.append(" = ").append(String.format("%02X", results.get(currentDumpIndex)));
                 tableModel.addRow(new Object[]{
                     Arrays.toString(operands),
-                    cand.get("result_index"),
+                    resultIndex,
                     opBuilder.toString()
                 });
             }
         }
         restoreCandidateSelection();
+    }
+
+    private static int transformByte(int b, boolean reverse, boolean negate) {
+        if (reverse) {
+            b = ((b & 0x0F) << 4) | ((b & 0xF0) >> 4);
+        }
+        if (negate) {
+            b ^= 0xFF;
+        }
+        return b;
     }
 
     private void restoreCandidateSelection() {
