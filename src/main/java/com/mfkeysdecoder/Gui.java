@@ -13,7 +13,6 @@ public class Gui extends JFrame {
     private final int maxCols;
     private Map<Integer, List<Map<String, Object>>> candidateByResult;
 
-    // Struttura per la selezione globale
     private static class GlobalSelection {
         Integer selectedDumpIndex = null;
         Integer selectedByteIndex = null;
@@ -32,7 +31,7 @@ public class Gui extends JFrame {
     private DefaultTableModel tableModel;
     private Map<Integer, Map<Integer, JLabel>> dumpLabelMap = new HashMap<>();
 
-    private int maxOperands; // Rimosso da parametri del costruttore
+    private int maxOperands;
 
     public Gui(List<int[]> dumps, int maxCols) {
         this.dumps = dumps;
@@ -45,16 +44,18 @@ public class Gui extends JFrame {
         setResizable(false);
         setLocationRelativeTo(null);
 
-        buildInputPanel(); // Sostituisce buildProgressPanel()
+        buildInputPanel();
         add(inputPanel, BorderLayout.CENTER);
     }
 
     private List<Map<String, Object>> getCurrentCandidates() {
-        if (globalSelection.selectedByteIndex == null) return null;
-        return candidateByResult.get(globalSelection.selectedByteIndex);
+        if (globalSelection.selectedByteIndex == null || candidateByResult == null)
+            return null;
+        List<Map<String, Object>> all = candidateByResult.get(globalSelection.selectedByteIndex);
+        if (all == null) return null;
+        return all;
     }
 
-    // +++ METODI MANCANTI AGGIUNTI +++
     private void buildProgressPanel() {
         progressPanel = new JPanel(new GridBagLayout());
         GridBagConstraints gbc = new GridBagConstraints();
@@ -77,13 +78,11 @@ public class Gui extends JFrame {
         gbc.insets = new Insets(15, 15, 15, 15);
         gbc.fill = GridBagConstraints.HORIZONTAL;
 
-        // Titolo
         gbc.gridx = 0; gbc.gridy = 0; gbc.gridwidth = 2;
         JLabel titleLabel = new JLabel("Selezione Algoritmo", SwingConstants.CENTER);
         titleLabel.setFont(new Font("Arial", Font.BOLD, 14));
         inputPanel.add(titleLabel, gbc);
 
-        // Selezione algoritmo
         gbc.gridy = 1; gbc.gridwidth = 1;
         gbc.anchor = GridBagConstraints.LINE_END;
         inputPanel.add(new JLabel("Algoritmo:"), gbc);
@@ -91,13 +90,9 @@ public class Gui extends JFrame {
         gbc.gridx = 1; gbc.anchor = GridBagConstraints.LINE_START;
         JComboBox<String> algoCombo = new JComboBox<>(new String[]{"ByteScrambler","HiddenXORFinder"});
         algoCombo.setPreferredSize(new Dimension(150, 30));
-        
-        // IMPOSTA BYTESCRAMBLER COME PREdefinito
-        algoCombo.setSelectedItem("ByteScrambler"); // <--- Aggiungi questa linea
-        
+        algoCombo.setSelectedItem("ByteScrambler");
         inputPanel.add(algoCombo, gbc);
 
-        // Pannello operandi (contiene etichetta e spinner)
         JPanel operandsPanel = new JPanel();
         operandsPanel.setLayout(new BoxLayout(operandsPanel, BoxLayout.X_AXIS));
         operandsPanel.add(new JLabel("Numero operandi:"));
@@ -105,21 +100,18 @@ public class Gui extends JFrame {
         operandsSpinner = new JSpinner(model);
         operandsPanel.add(operandsSpinner);
 
-        // Controlla visibilità INIZIALE del PANNELLO (non solo dello spinner)
         boolean showOperandsInitially = "ByteScrambler".equals(algoCombo.getSelectedItem());
-        operandsPanel.setVisible(showOperandsInitially); // <--- Modifica qui
+        operandsPanel.setVisible(showOperandsInitially);
 
-        // Listener per la combo box (aggiorna visibilità del PANNELLO)
         algoCombo.addItemListener(e -> {
             boolean showOperands = "ByteScrambler".equals(e.getItem());
-            operandsPanel.setVisible(showOperands); // <--- Modifica qui
+            operandsPanel.setVisible(showOperands);
             inputPanel.revalidate();
         });
-        
+
         gbc.gridx = 0; gbc.gridy = 2; gbc.gridwidth = 2;
         inputPanel.add(operandsPanel, gbc);
 
-        // Pulsante conferma
         gbc.gridy = 3; gbc.anchor = GridBagConstraints.CENTER;
         JButton confirmButton = new JButton("Avvia Analisi");
         confirmButton.addActionListener(e -> handleAlgorithmSelection(algoCombo.getSelectedItem().toString()));
@@ -128,15 +120,15 @@ public class Gui extends JFrame {
 
     private void handleAlgorithmSelection(String algorithm) {
         this.selectedAlgorithm = algorithm;
-    
-        if("ByteScrambler".equals(algorithm)) {
+
+        if ("ByteScrambler".equals(algorithm)) {
             try {
                 maxOperands = (Integer) operandsSpinner.getValue();
-                if(maxOperands > 2) {
+                if (maxOperands > 2) {
                     int response = JOptionPane.showConfirmDialog(this,
                         "Attenzione: con "+maxOperands+" operandi il tempo di calcolo aumenterà esponenzialmente",
                         "Avviso", JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE);
-                    
+
                     if (response == JOptionPane.CANCEL_OPTION) {
                         return;
                     }
@@ -147,14 +139,14 @@ public class Gui extends JFrame {
                     "Errore", JOptionPane.ERROR_MESSAGE);
                 return;
             }
-        } 
-        
+        }
+
         remove(inputPanel);
         buildProgressPanel();
         add(progressPanel, BorderLayout.CENTER);
         revalidate();
         repaint();
-        
+
         new Thread(this::startCalculation).start();
     }
 
@@ -162,16 +154,10 @@ public class Gui extends JFrame {
         try {
             if ("ByteScrambler".equals(selectedAlgorithm)) {
                 candidateByResult = ByteScrambler.searchCandidates(dumps, maxOperands, (current, total) -> {
-                    int percent = 0;
-                    if (total > 0) {
-                        percent = (int) ((current / (double) total) * 100);
-                        if (percent < 0) percent = 0;
-                        if (percent > 100) percent = 100;
-                    }
-                    final int percentFinal = percent;
+                    int percent = (int) ((current / (double) total) * 100);
                     SwingUtilities.invokeLater(() -> {
-                        progressBar.setValue(percentFinal);
-                        progressLabel.setText(String.format("Calcolo in corso... %d%%", percentFinal));
+                        progressBar.setValue(percent);
+                        progressLabel.setText(String.format("Calcolo in corso... %d%%", percent));
                     });
                 });
             } else if ("HiddenXORFinder".equals(selectedAlgorithm)) {
@@ -184,37 +170,14 @@ public class Gui extends JFrame {
                 });
             }
         } catch (InterruptedException e) {
-            Thread.currentThread().interrupt(); // Restore interrupted status
+            Thread.currentThread().interrupt();
             SwingUtilities.invokeLater(() -> {
                 JOptionPane.showMessageDialog(this, "Calculation interrupted", "Error", JOptionPane.ERROR_MESSAGE);
-                // Optionally revert UI to a previous state
             });
             return;
         }
         SwingUtilities.invokeLater(this::buildMainUI);
     }
-
-    private void updateLabelColor(JLabel label, int dumpIndex, int byteIndex) {
-        boolean hasCandidates = candidateByResult != null && candidateByResult.containsKey(byteIndex);
-        label.setBackground(hasCandidates ? Color.YELLOW : Color.BLACK);
-        label.setForeground(hasCandidates ? Color.BLACK : Color.WHITE);
-    }
-
-    private int findCandidateRow(List<Map<String, Object>> list, Map<String, Object> target) {
-        for (int i = 0; i < list.size(); i++) {
-            if (candidateEquals(list.get(i), target)) return i;
-        }
-        return -1;
-    }
-
-    private boolean candidateEquals(Map<String, Object> a, Map<String, Object> b) {
-        if (a == b) return true;
-        if (a == null || b == null) return false;
-        return Arrays.equals((int[]) a.get("operands"), (int[]) b.get("operands"))
-                && Objects.equals(a.get("ops"), b.get("ops"))
-                && Objects.equals(a.get("result_index"), b.get("result_index"));
-    }
-    // +++ FINE METODI AGGIUNTI +++
 
     private void buildMainUI() {
         remove(progressPanel);
@@ -226,7 +189,6 @@ public class Gui extends JFrame {
         tabbedPane = new JTabbedPane();
         dumpLabelMap.clear();
 
-        // Inizializza i tab con i byte
         for (int i = 0; i < dumps.size(); i++) {
             JPanel panel = new JPanel(new GridLayout(0, maxCols));
             int[] dump = dumps.get(i);
@@ -235,7 +197,6 @@ public class Gui extends JFrame {
                 JLabel label = createByteLabel(i, j, dump[j]);
                 panel.add(label);
                 byteMap.put(j, label);
-                tabbedPane.addTab("Dump " + (i + 1), panel);
             }
             dumpLabelMap.put(i, byteMap);
             tabbedPane.addTab("Dump " + (i + 1), panel);
@@ -256,8 +217,6 @@ public class Gui extends JFrame {
         JLabel label = new JLabel(String.format("%02X", value), SwingConstants.CENTER);
         label.setOpaque(true);
         label.setBorder(BorderFactory.createLineBorder(Color.GRAY));
-        // Rimuovi la chiamata a updateLabelColor qui
-
         label.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
@@ -272,7 +231,6 @@ public class Gui extends JFrame {
         Map<Integer, JLabel> byteMap = dumpLabelMap.get(currentDumpIndex);
         if (byteMap == null) return;
 
-        // Reset colori
         byteMap.forEach((byteIndex, label) -> {
             label.setBackground(Color.BLACK);
             label.setForeground(Color.WHITE);
@@ -283,22 +241,17 @@ public class Gui extends JFrame {
             }
         });
 
-        // Evidenzia selezione utente
         if (globalSelection.selectedByteIndex != null) {
             JLabel selectedLabel = byteMap.get(globalSelection.selectedByteIndex);
             if (selectedLabel != null) selectedLabel.setBorder(BorderFactory.createLineBorder(Color.RED, 2));
         }
 
-        // Evidenzia operandi
         if (globalSelection.selectedCandidate != null) {
             int[] operands = (int[]) globalSelection.selectedCandidate.get("operands");
-            
             for (int i = 0; i < operands.length; i++) {
-                // Per HiddenXORFinder, salta il secondo operando (indice 1)
                 if ("HiddenXORFinder".equals(selectedAlgorithm) && i == 1) {
-                    continue; 
+                    continue;
                 }
-                
                 JLabel lbl = byteMap.get(operands[i]);
                 if (lbl != null) {
                     lbl.setBackground(Color.GREEN);
@@ -312,7 +265,7 @@ public class Gui extends JFrame {
         globalSelection.selectedDumpIndex = dumpIndex;
         globalSelection.selectedByteIndex = byteIndex;
         globalSelection.selectedCandidate = null;
-        
+
         updateTable();
         updateHighlighting();
         tabbedPane.setSelectedIndex(dumpIndex);
@@ -326,6 +279,10 @@ public class Gui extends JFrame {
         scrollPane.setPreferredSize(new Dimension(400, 500));
         add(scrollPane, BorderLayout.EAST);
 
+        // Custom renderer per colonne IDXRisultato e Operazione SOLO per HiddenXORFinder
+        candidateTable.getColumnModel().getColumn(1).setCellRenderer(new HtmlCellRenderer());
+        candidateTable.getColumnModel().getColumn(2).setCellRenderer(new HtmlCellRenderer());
+
         candidateTable.getSelectionModel().addListSelectionListener(e -> {
             if (!e.getValueIsAdjusting()) {
                 int row = candidateTable.getSelectedRow();
@@ -334,17 +291,43 @@ public class Gui extends JFrame {
         });
     }
 
+    // Custom cell renderer per la colonna "IDXRisultato" e "Operazione" con HTML, per colorare la chiave
+    private class HtmlCellRenderer extends DefaultTableCellRenderer {
+        @Override
+        public Component getTableCellRendererComponent(JTable table, Object value,
+                boolean isSelected, boolean hasFocus, int row, int column) {
+            if (value instanceof String && ((String) value).startsWith("<html>")) {
+                JLabel label = new JLabel((String) value);
+                label.setOpaque(true);
+                if (isSelected) {
+                    label.setBackground(table.getSelectionBackground());
+                    label.setForeground(table.getSelectionForeground());
+                } else {
+                    label.setBackground(table.getBackground());
+                    label.setForeground(table.getForeground());
+                }
+                label.setFont(table.getFont());
+                return label;
+            }
+            return super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
+        }
+    }
+
     private void handleCandidateSelection(int row) {
-        List<Map<String, Object>> candidates = getCurrentCandidates();
-        if (row < candidates.size()) {
+        List<Map<String, Object>> candidates;
+        if ("HiddenXORFinder".equals(selectedAlgorithm)) {
+            candidates = candidateByResult.get(globalSelection.selectedByteIndex);
+        } else {
+            candidates = getCurrentCandidates();
+        }
+        if (candidates != null && row < candidates.size()) {
             globalSelection.selectedCandidate = candidates.get(row);
             updateHighlighting();
         }
     }
 
     private void updateUIForDumpChange(int newDumpIndex) {
-        // Aggiorna la tabella solo se il byte è valido per il nuovo dump
-        if (globalSelection.selectedByteIndex != null && 
+        if (globalSelection.selectedByteIndex != null &&
             globalSelection.selectedByteIndex < dumps.get(newDumpIndex).length) {
             updateTable();
             updateHighlighting();
@@ -357,9 +340,41 @@ public class Gui extends JFrame {
 
     private void updateTable() {
         tableModel.setRowCount(0);
+
+        if ("HiddenXORFinder".equals(selectedAlgorithm)) {
+            List<Map<String, Object>> candidates = candidateByResult.get(globalSelection.selectedByteIndex);
+            if (candidates == null) return;
+            int currentDumpIndex = tabbedPane.getSelectedIndex();
+            int[] currentDump = dumps.get(currentDumpIndex);
+            for (Map<String, Object> cand : candidates) {
+                int[] operands = (int[]) cand.get("operands");
+                int resultIndex = (int) cand.get("result_index");
+                List<Integer> results = (List<Integer>) cand.get("results");
+                if (results == null) continue;
+
+                // Calcola la chiave (valore)
+                Integer keyVal = HiddenXORFinder.getKeyFromIndex(resultIndex);
+                String chiaveHex = keyVal != null ? String.format("%02X", keyVal) : String.format("%02X", resultIndex);
+
+                // Visualizza Operazione come: <byte1> XOR <byte2> = <chiave> (chiave in rosso)
+                String byte1 = String.format("%02X", currentDump[operands[0]]);
+                String byte2 = String.format("%02X", currentDump[operands[1]]);
+                String operazioneStr = String.format("%s XOR %s = <span style='color:red;font-weight:bold;'>%s</span>", byte1, byte2, chiaveHex);
+
+                // La chiave in IDXRisultato, in rosso
+                tableModel.addRow(new Object[]{
+                    Arrays.toString(operands),
+                    "<html><span style='color:red;font-weight:bold;'>" + chiaveHex + "</span></html>",
+                    "<html>" + operazioneStr + "</html>"
+                });
+            }
+            restoreCandidateSelection();
+            return;
+        }
+
+        // Altri algoritmi: ByteScrambler
         List<Map<String, Object>> candidates = getCurrentCandidates();
         if (candidates == null) return;
-
         int currentDumpIndex = tabbedPane.getSelectedIndex();
         int[] currentDump = dumps.get(currentDumpIndex);
 
@@ -368,80 +383,53 @@ public class Gui extends JFrame {
             List<Boolean> negations = (List<Boolean>) cand.get("negations");
             List<Boolean> reverses = (List<Boolean>) cand.get("reverses");
             int resultIndex = (int) cand.get("result_index");
-
-            if ("HiddenXORFinder".equals(selectedAlgorithm)) {
-                // Calcola i byte trasformati per entrambi gli operandi
-                int originalI = currentDump[operands[0]];
-                int originalJ = currentDump[operands[1]];
-
-                boolean negateI = negations.get(0);
-                boolean reverseI = reverses.get(0);
-                int transformedI = transformByte(originalI, reverseI, negateI);
-                String formattedI = (negateI ? "!" : "") + String.format("%02X", transformedI);
-
-                boolean negateJ = negations.get(1);
-                boolean reverseJ = reverses.get(1);
-                int transformedJ = transformByte(originalJ, reverseJ, negateJ);
-                String formattedJ = (negateJ ? "!" : "") + String.format("%02X", transformedJ);
-
-                // Ottieni la chiave comune
-                Integer commonN = HiddenXORFinder.getKeyFromIndex(resultIndex);
-                String keyStr = (commonN != null) ? String.format("%02X", commonN) : "??";
-
-                // Costruisci la stringa dell'operazione
-                String operation = String.format(
-                    "<html>%s XOR %s, KEY: <font color='red'>%s</font></html>",
-                    formattedI, formattedJ, keyStr
-                );
-
-                tableModel.addRow(new Object[]{
-                    Arrays.toString(operands),
-                    resultIndex,
-                    operation
-                });
-            } else {
-                // Logica esistente per ByteScrambler
-                List<String> ops = (List<String>) cand.get("ops");
-                List<Integer> results = (List<Integer>) cand.get("results");
-                if (results == null) continue;  // Skip entry non valida
-                StringBuilder opBuilder = new StringBuilder();
-                for (int i = 0; i < operands.length; i++) {
-                    if (i > 0) opBuilder.append(" ").append(ops.get(i - 1)).append(" ");
-                    if (negations != null && i < negations.size() && negations.get(i)) {
-                        opBuilder.append("!");
-                    }
-                    opBuilder.append(String.format("%02X", currentDump[operands[i]]));
+            List<String> ops = (List<String>) cand.get("ops");
+            List<Integer> results = (List<Integer>) cand.get("results");
+            if (results == null) continue;
+            StringBuilder opBuilder = new StringBuilder();
+            for (int i = 0; i < operands.length; i++) {
+                if (i > 0) opBuilder.append(" ").append(ops.isEmpty() ? "" : ops.get(i - 1)).append(" ");
+                if (negations != null && i < negations.size() && negations.get(i)) {
+                    opBuilder.append("!");
                 }
-                opBuilder.append(" = ").append(String.format("%02X", results.get(currentDumpIndex)));
-                tableModel.addRow(new Object[]{
-                    Arrays.toString(operands),
-                    resultIndex,
-                    opBuilder.toString()
-                });
+                opBuilder.append(String.format("%02X", currentDump[operands[i]]));
             }
+            opBuilder.append(" = ").append(String.format("%02X", results.get(currentDumpIndex)));
+            tableModel.addRow(new Object[]{
+                Arrays.toString(operands),
+                resultIndex,
+                opBuilder.toString()
+            });
         }
         restoreCandidateSelection();
     }
 
-    private static int transformByte(int b, boolean reverse, boolean negate) {
-        if (reverse) {
-            b = ((b & 0x0F) << 4) | ((b & 0xF0) >> 4);
-        }
-        if (negate) {
-            b ^= 0xFF;
-        }
-        return b;
-    }
-
     private void restoreCandidateSelection() {
-        if (globalSelection.selectedCandidate != null) {
-            List<Map<String, Object>> candidates = getCurrentCandidates();
+        List<Map<String, Object>> candidates;
+        if ("HiddenXORFinder".equals(selectedAlgorithm)) {
+            candidates = candidateByResult.get(globalSelection.selectedByteIndex);
+        } else {
+            candidates = getCurrentCandidates();
+        }
+        if (globalSelection.selectedCandidate != null && candidates != null) {
             int row = findCandidateRow(candidates, globalSelection.selectedCandidate);
             if (row >= 0) candidateTable.setRowSelectionInterval(row, row);
         }
     }
 
-    // ... [METODI HELPER findCandidateRow, candidateEquals INVARIATI]
+    private int findCandidateRow(List<Map<String, Object>> list, Map<String, Object> target) {
+        for (int i = 0; i < list.size(); i++) {
+            if (candidateEquals(list.get(i), target)) return i;
+        }
+        return -1;
+    }
+    private boolean candidateEquals(Map<String, Object> a, Map<String, Object> b) {
+        if (a == b) return true;
+        if (a == null || b == null) return false;
+        return Arrays.equals((int[]) a.get("operands"), (int[]) b.get("operands"))
+                && Objects.equals(a.get("ops"), b.get("ops"))
+                && Objects.equals(a.get("result_index"), b.get("result_index"));
+    }
 
     public void start() {
         setVisible(true);

@@ -4,11 +4,14 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BinaryOperator;
+import java.util.stream.Collectors;
 
 public class ByteScrambler {
     public static final Map<String, BinaryOperator<Integer>> candidateFunctions = new LinkedHashMap<>();
-    // Cambia cache: ora salva la mappa del candidato (o null se non valido)
+    // Cache per candidati intermedi
     private static final Map<Integer, Map<String, Object>> operationCache = new ConcurrentHashMap<>();
+    // Limite massimo per la cache dei candidati temporanei (configurabile)
+    private static final int MAX_CACHED_CANDIDATES = 200_000; // Modifica qui il limite secondo la RAM
 
     static {
         candidateFunctions.put("XOR", (a, b) -> a ^ b);
@@ -49,6 +52,7 @@ public class ByteScrambler {
         return result;
     }
 
+    // result: Map<result_index, List<Map<String, Object>>>
     public static Map<Integer, List<Map<String, Object>>> searchCandidates(
             List<int[]> dumps,
             int maxOperands,
@@ -92,7 +96,38 @@ public class ByteScrambler {
 
         progressCallback.update(total, total);
         operationCache.clear();
-        return new HashMap<>(candidateByResult);
+
+        // Deduplica i candidati per ogni indice risultato
+        Map<Integer, List<Map<String, Object>>> deduped = new HashMap<>();
+        for (Map.Entry<Integer, List<Map<String, Object>>> entry : candidateByResult.entrySet()) {
+            deduped.put(entry.getKey(), deduplicate(entry.getValue()));
+        }
+        return deduped;
+    }
+
+    private static List<Map<String, Object>> deduplicate(List<Map<String, Object>> list) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Map<String, Object> c : list) {
+            boolean found = false;
+            for (Map<String, Object> d : result) {
+                if (candidateEquals(c, d)) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) result.add(c);
+        }
+        return result;
+    }
+
+    private static boolean candidateEquals(Map<String, Object> a, Map<String, Object> b) {
+        if (a == b) return true;
+        if (a == null || b == null) return false;
+        return Arrays.equals((int[]) a.get("operands"), (int[]) b.get("operands"))
+                && Objects.equals(a.get("ops"), b.get("ops"))
+                && Objects.equals(a.get("negations"), b.get("negations"))
+                && Objects.equals(a.get("reverses"), b.get("reverses"))
+                && Objects.equals(a.get("result_index"), b.get("result_index"));
     }
 
     private static long calculateTotalCombinations(int n, int maxOperands) {
@@ -135,6 +170,9 @@ public class ByteScrambler {
         private final AtomicInteger progress;
         private final long total;
         private final ProgressCallback progressCallback;
+
+        // Lista cache temporanea dei candidati validi trovati in questo task
+        private final List<Map<String, Object>> cachedCandidates = Collections.synchronizedList(new ArrayList<>());
 
         CandidateTask(List<int[]> dumps, int[] operandIndices, int numOperands,
                       Map<Integer, List<Map<String, Object>>> candidateByResult,
@@ -188,8 +226,14 @@ public class ByteScrambler {
                             Map<String, Object> cand = buildCandidate(
                                     opCombo, negPattern, revPattern, functionNames, results
                             );
-                            addCandidateToMap(cand, results);
+                            addCandidateToMap(cand);
                             operationCache.put(keyHash, cand);
+                            synchronized (cachedCandidates) {
+                                cachedCandidates.add(cand);
+                                if (cachedCandidates.size() >= MAX_CACHED_CANDIDATES) {
+                                    flushCachedCandidates();
+                                }
+                            }
                         }
 
                         int current = progress.incrementAndGet();
@@ -198,6 +242,20 @@ public class ByteScrambler {
                         }
                     }
                 }
+            }
+            synchronized (cachedCandidates) {
+                if (!cachedCandidates.isEmpty()) {
+                    flushCachedCandidates();
+                }
+            }
+        }
+
+        private void flushCachedCandidates() {
+            synchronized (cachedCandidates) {
+                for (Map<String, Object> cand : cachedCandidates) {
+                    addCandidateToMap(cand);
+                }
+                cachedCandidates.clear();
             }
         }
 
@@ -300,7 +358,7 @@ public class ByteScrambler {
             return cand;
         }
 
-        private void addCandidateToMap(Map<String, Object> cand, List<Integer> results) {
+        private void addCandidateToMap(Map<String, Object> cand) {
             if (cand.containsKey("result_index")) {
                 int resultIdx = (Integer) cand.get("result_index");
                 candidateByResult
