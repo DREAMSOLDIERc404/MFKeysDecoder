@@ -52,13 +52,18 @@ public class Main {
 
         // Stima: 1 KB = 1000 bytes per candidato
         long maxCachedCandidates = heapUsableBytes / 1000;
-        String maxCachedStr = String.format("%,d", maxCachedCandidates).replace(',', '_');
+
+        /*MODIFICA DI DEBUG*/
+        maxCachedCandidates=200_000; // Imposta un valore di debug per testare la cache
+
+        String maxCachedStr = String.format("%,d", maxCachedCandidates).replace('.', '_');
         System.out.println("MAX_CACHED_CANDIDATES ideale (heap 70%, 1KB/candidato): " + maxCachedStr);
         System.out.println();
         int safeMaxCachedCandidates = (maxCachedCandidates > Integer.MAX_VALUE)
             ? Integer.MAX_VALUE
             : (int) maxCachedCandidates;
-        ByteScrambler scrambler = new ByteScrambler(safeMaxCachedCandidates);;
+
+        ByteScrambler scrambler = new ByteScrambler(safeMaxCachedCandidates);
 
 
         SwingUtilities.invokeLater(() -> {

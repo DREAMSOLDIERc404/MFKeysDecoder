@@ -97,7 +97,7 @@ Sentiti libero di utilizzarlo, modificarlo e condividerlo!
 
 ## DA AGGIUNGERE
 
-- Aggiusta la c***o di percentuale, non deve andare in overflow
+- Aggiusta la c***o di percentuale, non deve andare in overflow e AMCHE L'OUT OF BOUND DELL'HEAP
 - Meccanica di salvataggio progresso sennò uno dopo 2 ore di attesa magari chiude  e perde tutto.
 - Aggiungere un ETA al loading ("Estimated Time of Arrival", ovvero "Orario di arrivo previsto")
 - Aggiungere uno scroll se no i dump con più di 20 righe non si leggono (o pensa a un modo perchè si vedano
