@@ -1,4 +1,7 @@
 package com.mfkeysdecoder;
+
+import com.mfkeysdecoder.ALGOS.ByteScrambler;
+
 import java.io.*;
 import java.util.*;
 import javax.swing.*;
@@ -51,9 +54,13 @@ public class Main {
         long maxCachedCandidates = heapUsableBytes / 1000;
         String maxCachedStr = String.format("%,d", maxCachedCandidates).replace(',', '_');
         System.out.println("MAX_CACHED_CANDIDATES ideale (heap 70%, 1KB/candidato): " + maxCachedStr);
+        System.out.println();
+        int safeMaxCachedCandidates = (maxCachedCandidates > Integer.MAX_VALUE)
+            ? Integer.MAX_VALUE
+            : (int) maxCachedCandidates;
+        ByteScrambler scrambler = new ByteScrambler(safeMaxCachedCandidates);;
 
-        // Usa il costruttore per passare il valore a ByteScrambler
-        ByteScrambler scrambler = new ByteScrambler(maxCachedCandidates);
+
         SwingUtilities.invokeLater(() -> {
             try {
                 List<int[]> dumps = loadDumpsFromDirectory("dumps");

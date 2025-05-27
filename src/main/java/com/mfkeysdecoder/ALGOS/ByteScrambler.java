@@ -11,7 +11,21 @@ public class ByteScrambler {
     // Cache per candidati intermedi
     private static final Map<Integer, Map<String, Object>> operationCache = new ConcurrentHashMap<>();
     // Limite massimo per la cache dei candidati temporanei (configurabile)
-    private static final int MAX_CACHED_CANDIDATES = 7_500_000; // Modifica qui il limite secondo la RAM
+    private static int MAX_CACHED_CANDIDATES = 1_500_000; // Default
+
+    // Nuovo costruttore per impostare il limite
+    public ByteScrambler(int maxCachedCandidates) {
+        setMaxCachedCandidates(maxCachedCandidates);
+    }
+
+    // Metodo statico per impostare il limite
+    public static void setMaxCachedCandidates(int maxCachedCandidates) {
+        MAX_CACHED_CANDIDATES = maxCachedCandidates;
+    }
+
+    public static int getMaxCachedCandidates() {
+        return MAX_CACHED_CANDIDATES;
+    }
 
     static {
         candidateFunctions.put("XOR", (a, b) -> a ^ b);
