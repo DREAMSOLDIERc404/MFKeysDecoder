@@ -7,7 +7,8 @@ import java.util.function.BinaryOperator;
 
 public class ByteScrambler {
     public static final Map<String, BinaryOperator<Integer>> candidateFunctions = new LinkedHashMap<>();
-    private static final Map<Integer, Boolean> operationCache = new ConcurrentHashMap<>();
+    // Cambia cache: ora salva la mappa del candidato (o null se non valido)
+    private static final Map<Integer, Map<String, Object>> operationCache = new ConcurrentHashMap<>();
 
     static {
         candidateFunctions.put("XOR", (a, b) -> a ^ b);
@@ -58,7 +59,7 @@ public class ByteScrambler {
         Map<Integer, List<Map<String, Object>>> candidateByResult = new ConcurrentHashMap<>();
         AtomicInteger progress = new AtomicInteger(0);
         long total = calculateTotalCombinations(n, maxOperands);
-        
+
         if (total == Long.MAX_VALUE) {
             progressCallback.handleOverflow();
             throw new IllegalArgumentException("Too many combinations to compute without overflow.");
@@ -70,7 +71,7 @@ public class ByteScrambler {
         for (int numOperands = 1; numOperands <= maxOperands; numOperands++) {
             final int currentNumOperands = numOperands;
             List<int[]> operandCombinations = combinations(n, numOperands);
-            
+
             for (int[] operandIndices : operandCombinations) {
                 futures.add(executor.submit(new CandidateTask(
                         dumps, operandIndices, currentNumOperands,
@@ -101,16 +102,16 @@ public class ByteScrambler {
             long negationComb = 1L << numOperands;
             long reverseComb = (numOperands == 1) ? 2 : 1L << (numOperands - 1);
             long opComb = (numOperands > 1) ? (long) Math.pow(candidateFunctions.size(), numOperands - 1) : 1;
-    
+
             long product = safeMultiply(combOperands, negationComb);
             if (product < 0) return Long.MAX_VALUE;
-    
+
             product = safeMultiply(product, reverseComb);
             if (product < 0) return Long.MAX_VALUE;
-    
+
             product = safeMultiply(product, opComb);
             if (product < 0) return Long.MAX_VALUE;
-    
+
             if (Long.MAX_VALUE - total < product) {
                 return Long.MAX_VALUE;
             }
@@ -118,7 +119,7 @@ public class ByteScrambler {
         }
         return total;
     }
-    
+
     private static long safeMultiply(long a, long b) {
         if (a != 0 && b != 0 && (a * b) / a != b) {
             return -1;
@@ -136,8 +137,8 @@ public class ByteScrambler {
         private final ProgressCallback progressCallback;
 
         CandidateTask(List<int[]> dumps, int[] operandIndices, int numOperands,
-                     Map<Integer, List<Map<String, Object>>> candidateByResult,
-                     AtomicInteger progress, long total, ProgressCallback progressCallback) {
+                      Map<Integer, List<Map<String, Object>>> candidateByResult,
+                      AtomicInteger progress, long total, ProgressCallback progressCallback) {
             this.dumps = dumps;
             this.operandIndices = operandIndices;
             this.numOperands = numOperands;
@@ -173,21 +174,22 @@ public class ByteScrambler {
                                 revPattern.hashCode()
                         );
 
-                        Boolean cachedValidity = operationCache.get(keyHash);
-                        if (cachedValidity != null) {
-                            if (cachedValidity) {
-                                addCachedCandidate(keyHash);
-                            }
+                        Map<String, Object> cachedCandidate = operationCache.get(keyHash);
+                        if (cachedCandidate != null) {
+                            addCachedCandidate(cachedCandidate);
                             progress.incrementAndGet();
                             continue;
                         }
 
                         List<Integer> results = new ArrayList<>();
                         boolean isValid = processCombination(opCombo, negPattern, revPattern, functionList, results);
-                        operationCache.put(keyHash, isValid);
 
                         if (isValid) {
-                            addCandidateToMap(opCombo, negPattern, revPattern, functionNames, results);
+                            Map<String, Object> cand = buildCandidate(
+                                    opCombo, negPattern, revPattern, functionNames, results
+                            );
+                            addCandidateToMap(cand, results);
+                            operationCache.put(keyHash, cand);
                         }
 
                         int current = progress.incrementAndGet();
@@ -252,12 +254,12 @@ public class ByteScrambler {
             }
 
             Set<Integer> uniqueResults = new HashSet<>(results);
-            return valid && !commonIndices.isEmpty() && uniqueResults.size() > 1;
+            return valid && commonIndices != null && !commonIndices.isEmpty() && uniqueResults.size() > 1;
         }
 
-        private void addCandidateToMap(List<Integer> opCombo, List<Boolean> negPattern,
-                                      List<Boolean> revPattern, List<String> functionNames,
-                                      List<Integer> results) {
+        private Map<String, Object> buildCandidate(List<Integer> opCombo, List<Boolean> negPattern,
+                                                   List<Boolean> revPattern, List<String> functionNames,
+                                                   List<Integer> results) {
             Map<String, Object> cand = new HashMap<>();
             cand.put("operands", operandIndices.clone());
             cand.put("negations", new ArrayList<>(negPattern));
@@ -294,17 +296,30 @@ public class ByteScrambler {
 
             if (!commonIndices.isEmpty()) {
                 cand.put("result_index", Collections.min(commonIndices));
-                candidateByResult.computeIfAbsent(Collections.min(commonIndices), k -> Collections.synchronizedList(new ArrayList<>()))
+            }
+            return cand;
+        }
+
+        private void addCandidateToMap(Map<String, Object> cand, List<Integer> results) {
+            if (cand.containsKey("result_index")) {
+                int resultIdx = (Integer) cand.get("result_index");
+                candidateByResult
+                        .computeIfAbsent(resultIdx, k -> Collections.synchronizedList(new ArrayList<>()))
                         .add(cand);
             }
         }
 
-        private void addCachedCandidate(int keyHash) {
-            // Implementazione per recuperare candidati dalla cache se necessario
+        private void addCachedCandidate(Map<String, Object> cand) {
+            if (cand.containsKey("result_index")) {
+                int resultIdx = (Integer) cand.get("result_index");
+                candidateByResult
+                        .computeIfAbsent(resultIdx, k -> Collections.synchronizedList(new ArrayList<>()))
+                        .add(cand);
+            }
         }
     }
 
-    // Utility methods rimangono invariati
+    // Utility methods invariati
     private static List<int[]> combinations(int n, int r) {
         List<int[]> result = new ArrayList<>();
         combinationHelper(result, new int[r], 0, n - 1, 0);
