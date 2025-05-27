@@ -162,10 +162,16 @@ public class Gui extends JFrame {
         try {
             if ("ByteScrambler".equals(selectedAlgorithm)) {
                 candidateByResult = ByteScrambler.searchCandidates(dumps, maxOperands, (current, total) -> {
-                    int percent = (int) ((current / (double) total) * 100);
+                    int percent = 0;
+                    if (total > 0) {
+                        percent = (int) ((current / (double) total) * 100);
+                        if (percent < 0) percent = 0;
+                        if (percent > 100) percent = 100;
+                    }
+                    final int percentFinal = percent;
                     SwingUtilities.invokeLater(() -> {
-                        progressBar.setValue(percent);
-                        progressLabel.setText(String.format("Calcolo in corso... %d%%", percent));
+                        progressBar.setValue(percentFinal);
+                        progressLabel.setText(String.format("Calcolo in corso... %d%%", percentFinal));
                     });
                 });
             } else if ("HiddenXORFinder".equals(selectedAlgorithm)) {
