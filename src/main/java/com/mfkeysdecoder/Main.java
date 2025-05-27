@@ -38,6 +38,22 @@ public class Main {
     }
 
     public static void main(String[] args) {
+
+        long heapMaxBytes = Runtime.getRuntime().maxMemory();
+        double heapMaxGB = heapMaxBytes / (1024.0 * 1024 * 1024);
+        System.out.printf("Heap massimo: %.2f GB (%d bytes)%n", heapMaxGB, heapMaxBytes);
+
+        long heapUsableBytes = (long) (heapMaxBytes * 0.7);
+        double heapUsableGB = heapUsableBytes / (1024.0 * 1024 * 1024);
+        System.out.printf("Heap utilizzabile per cache: %.2f GB (%d bytes)%n", heapUsableGB, heapUsableBytes);
+
+        // Stima: 1 KB = 1000 bytes per candidato
+        long maxCachedCandidates = heapUsableBytes / 1000;
+        String maxCachedStr = String.format("%,d", maxCachedCandidates).replace(',', '_');
+        System.out.println("MAX_CACHED_CANDIDATES ideale (heap 70%, 1KB/candidato): " + maxCachedStr);
+
+        // Usa il costruttore per passare il valore a ByteScrambler
+        ByteScrambler scrambler = new ByteScrambler(maxCachedCandidates);
         SwingUtilities.invokeLater(() -> {
             try {
                 List<int[]> dumps = loadDumpsFromDirectory("dumps");
