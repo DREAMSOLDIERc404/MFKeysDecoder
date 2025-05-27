@@ -13,3 +13,11 @@ dependencies {
 application {
     mainClass = 'com.mfkeysdecoder.Main'
 }
+
+run {
+
+    jvmArgs = [
+         
+            "-Xmx8g"
+    ]
+}
