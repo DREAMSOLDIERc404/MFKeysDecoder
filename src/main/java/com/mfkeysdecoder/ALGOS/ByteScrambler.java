@@ -246,6 +246,7 @@ public class ByteScrambler {
                                 cachedCandidates.add(cand);
                                 if (cachedCandidates.size() >= MAX_CACHED_CANDIDATES) {
                                     flushCachedCandidates();
+
                                 }
                             }
                         }
@@ -270,6 +271,7 @@ public class ByteScrambler {
                     addCandidateToMap(cand);
                 }
                 cachedCandidates.clear();
+                operationCache.clear();
             }
         }
 

@@ -54,7 +54,7 @@ public class Main {
         long maxCachedCandidates = heapUsableBytes / 1000;
 
         /*MODIFICA DI DEBUG*/
-        maxCachedCandidates=200_000; // Imposta un valore di debug per testare la cache
+        //maxCachedCandidates=200_000; // Imposta un valore di debug per testare la cache
 
         String maxCachedStr = String.format("%,d", maxCachedCandidates).replace('.', '_');
         System.out.println("MAX_CACHED_CANDIDATES ideale (heap 70%, 1KB/candidato): " + maxCachedStr);
