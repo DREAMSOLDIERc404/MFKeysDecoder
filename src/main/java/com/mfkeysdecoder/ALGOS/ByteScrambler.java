@@ -4,27 +4,38 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BinaryOperator;
-import java.util.stream.Collectors;
 
 public class ByteScrambler {
     public static final Map<String, BinaryOperator<Integer>> candidateFunctions = new LinkedHashMap<>();
-    // Cache per candidati intermedi
-    private static final Map<Integer, Map<String, Object>> operationCache = new ConcurrentHashMap<>();
-    // Limite massimo per la cache dei candidati temporanei (configurabile)
-    private static int MAX_CACHED_CANDIDATES = 1_500_000; // Default
 
-    // Nuovo costruttore per impostare il limite
-    public ByteScrambler(int maxCachedCandidates) {
-        setMaxCachedCandidates(maxCachedCandidates);
+    // Limite massimo per la cache delle operazioni (configurabile)
+    private static int MAX_CACHED_OPERATIONS = 1_500_000;
+
+    // Sentinella per candidati non validi
+    private static final Map<String, Object> INVALID_CANDIDATE =
+            Collections.singletonMap("valid", false);
+
+    // Cache LRU per operazioni intermedie (completamente eliminabile con clear)
+    private static final Map<Integer, Map<String, Object>> operationCache =
+        Collections.synchronizedMap(new LinkedHashMap<Integer, Map<String, Object>>(16, 0.75f, true) {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<Integer, Map<String, Object>> eldest) {
+                return size() > MAX_CACHED_OPERATIONS;
+            }
+        });
+
+    // Costruttore per impostare il limite della cache operazioni
+    public ByteScrambler(int maxCachedOperations) {
+        setMaxCachedOperations(maxCachedOperations);
     }
 
     // Metodo statico per impostare il limite
-    public static void setMaxCachedCandidates(int maxCachedCandidates) {
-        MAX_CACHED_CANDIDATES = maxCachedCandidates;
+    public static void setMaxCachedOperations(int maxCachedOperations) {
+        MAX_CACHED_OPERATIONS = maxCachedOperations;
     }
 
-    public static int getMaxCachedCandidates() {
-        return MAX_CACHED_CANDIDATES;
+    public static int getMaxCachedOperations() {
+        return MAX_CACHED_OPERATIONS;
     }
 
     static {
@@ -109,7 +120,11 @@ public class ByteScrambler {
         executor.awaitTermination(1, TimeUnit.HOURS);
 
         progressCallback.update(total, total);
-        operationCache.clear();
+
+        // Eliminazione completa e sicura della cache
+        synchronized (operationCache) {
+            operationCache.clear();
+        }
 
         // Deduplica i candidati per ogni indice risultato
         Map<Integer, List<Map<String, Object>>> deduped = new HashMap<>();
@@ -185,7 +200,7 @@ public class ByteScrambler {
         private final long total;
         private final ProgressCallback progressCallback;
 
-        // Lista cache temporanea dei candidati validi trovati in questo task
+        // Lista temporanea dei candidati validi trovati in questo task
         private final List<Map<String, Object>> cachedCandidates = Collections.synchronizedList(new ArrayList<>());
 
         CandidateTask(List<int[]> dumps, int[] operandIndices, int numOperands,
@@ -227,12 +242,19 @@ public class ByteScrambler {
                         );
 
                         Map<String, Object> cachedCandidate = operationCache.get(keyHash);
+                        // -- Gestione dei tre casi della cache
                         if (cachedCandidate != null) {
+                            // Caso 2: trovato ma non valido
+                            if (cachedCandidate.containsKey("valid") && Boolean.FALSE.equals(cachedCandidate.get("valid"))) {
+                                progress.incrementAndGet();
+                                continue;
+                            }
+                            // Caso 3: trovato e valido
                             addCachedCandidate(cachedCandidate);
                             progress.incrementAndGet();
                             continue;
                         }
-
+                        // Caso 1: non trovato, calcolo e controllo
                         List<Integer> results = new ArrayList<>();
                         boolean isValid = processCombination(opCombo, negPattern, revPattern, functionList, results);
 
@@ -244,11 +266,10 @@ public class ByteScrambler {
                             operationCache.put(keyHash, cand);
                             synchronized (cachedCandidates) {
                                 cachedCandidates.add(cand);
-                                if (cachedCandidates.size() >= MAX_CACHED_CANDIDATES) {
-                                    flushCachedCandidates();
-
-                                }
                             }
+                        } else {
+                            // Salva nella cache come NON valido (sentinella)
+                            operationCache.put(keyHash, INVALID_CANDIDATE);
                         }
 
                         int current = progress.incrementAndGet();
@@ -271,7 +292,6 @@ public class ByteScrambler {
                     addCandidateToMap(cand);
                 }
                 cachedCandidates.clear();
-                operationCache.clear();
             }
         }
 

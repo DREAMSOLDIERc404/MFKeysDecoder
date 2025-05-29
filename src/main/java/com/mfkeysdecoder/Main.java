@@ -51,20 +51,16 @@ public class Main {
         System.out.printf("Heap utilizzabile per cache: %.2f GB (%d bytes)%n", heapUsableGB, heapUsableBytes);
 
         // Stima: 1 KB = 1000 bytes per candidato
-        long maxCachedCandidates = heapUsableBytes / 1000;
+        long maxCachedOperations = heapUsableBytes / 1000;
 
-        /*MODIFICA DI DEBUG*/
-        //maxCachedCandidates=200_000; // Imposta un valore di debug per testare la cache
-
-        String maxCachedStr = String.format("%,d", maxCachedCandidates).replace('.', '_');
-        System.out.println("MAX_CACHED_CANDIDATES ideale (heap 70%, 1KB/candidato): " + maxCachedStr);
+        String maxCachedStr = String.format("%,d", maxCachedOperations).replace('.', '_');
+        System.out.println("MAX_CACHED_OPERATIONS ideale (heap 70%, 1KB/operazione): " + maxCachedStr);
         System.out.println();
-        int safeMaxCachedCandidates = (maxCachedCandidates > Integer.MAX_VALUE)
+        int safeMaxCachedOperations = (maxCachedOperations > Integer.MAX_VALUE)
             ? Integer.MAX_VALUE
-            : (int) maxCachedCandidates;
+            : (int) maxCachedOperations;
 
-        ByteScrambler scrambler = new ByteScrambler(safeMaxCachedCandidates);
-
+        ByteScrambler scrambler = new ByteScrambler(safeMaxCachedOperations);
 
         SwingUtilities.invokeLater(() -> {
             try {
