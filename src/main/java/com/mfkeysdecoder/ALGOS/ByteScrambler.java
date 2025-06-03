@@ -8,6 +8,39 @@ import java.util.function.BinaryOperator;
 public class ByteScrambler {
     public static final Map<String, BinaryOperator<Integer>> candidateFunctions = new LinkedHashMap<>();
 
+    // Classe per chiavi di cache affidabili
+    static class CacheKey {
+        final int[] operandIndices;
+        final List<Integer> opCombo;
+        final List<Boolean> negPattern;
+        final List<Boolean> revPattern;
+
+        CacheKey(int[] operandIndices, List<Integer> opCombo, List<Boolean> negPattern, List<Boolean> revPattern) {
+            this.operandIndices = operandIndices.clone();
+            this.opCombo = new ArrayList<>(opCombo);
+            this.negPattern = new ArrayList<>(negPattern);
+            this.revPattern = new ArrayList<>(revPattern);
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            CacheKey cacheKey = (CacheKey) o;
+            return Arrays.equals(operandIndices, cacheKey.operandIndices) &&
+                    Objects.equals(opCombo, cacheKey.opCombo) &&
+                    Objects.equals(negPattern, cacheKey.negPattern) &&
+                    Objects.equals(revPattern, cacheKey.revPattern);
+        }
+
+        @Override
+        public int hashCode() {
+            int result = Objects.hash(opCombo, negPattern, revPattern);
+            result = 31 * result + Arrays.hashCode(operandIndices);
+            return result;
+        }
+    }
+
     // Limite massimo per la cache delle operazioni (configurabile)
     private static int MAX_CACHED_OPERATIONS = 1_500_000;
 
@@ -16,10 +49,10 @@ public class ByteScrambler {
             Collections.singletonMap("valid", false);
 
     // Cache LRU per operazioni intermedie (completamente eliminabile con clear)
-    private static final Map<Integer, Map<String, Object>> operationCache =
-        Collections.synchronizedMap(new LinkedHashMap<Integer, Map<String, Object>>(16, 0.75f, true) {
+    private static final Map<CacheKey, Map<String, Object>> operationCache =
+        Collections.synchronizedMap(new LinkedHashMap<CacheKey, Map<String, Object>>(16, 0.75f, true) {
             @Override
-            protected boolean removeEldestEntry(Map.Entry<Integer, Map<String, Object>> eldest) {
+            protected boolean removeEldestEntry(Map.Entry<CacheKey, Map<String, Object>> eldest) {
                 return size() > MAX_CACHED_OPERATIONS;
             }
         });
@@ -155,8 +188,7 @@ public class ByteScrambler {
         return Arrays.equals((int[]) a.get("operands"), (int[]) b.get("operands"))
                 && Objects.equals(a.get("ops"), b.get("ops"))
                 && Objects.equals(a.get("negations"), b.get("negations"))
-                && Objects.equals(a.get("reverses"), b.get("reverses"))
-                && Objects.equals(a.get("result_index"), b.get("result_index"));
+                && Objects.equals(a.get("reverses"), b.get("reverses"));
     }
 
     private static long calculateTotalCombinations(int n, int maxOperands) {
@@ -234,42 +266,54 @@ public class ByteScrambler {
                                     : productFixedFirstTrue(numOperands);
 
                     for (List<Boolean> revPattern : reversePatterns) {
-                        int keyHash = Objects.hash(
-                                Arrays.hashCode(operandIndices),
-                                opCombo.hashCode(),
-                                negPattern.hashCode(),
-                                revPattern.hashCode()
+                        CacheKey key = new CacheKey(
+                            operandIndices, 
+                            opCombo, 
+                            negPattern, 
+                            revPattern
                         );
 
-                        Map<String, Object> cachedCandidate = operationCache.get(keyHash);
-                        // -- Gestione dei tre casi della cache
+                        Map<String, Object> cachedCandidate;
+                        synchronized (operationCache) {
+                            cachedCandidate = operationCache.get(key);
+                        }
+
                         if (cachedCandidate != null) {
-                            // Caso 2: trovato ma non valido
-                            if (cachedCandidate.containsKey("valid") && Boolean.FALSE.equals(cachedCandidate.get("valid"))) {
+                            if (cachedCandidate == INVALID_CANDIDATE) {
                                 progress.incrementAndGet();
                                 continue;
                             }
-                            // Caso 3: trovato e valido
-                            addCachedCandidate(cachedCandidate);
+                            // Aggiungi alla lista temporanea
+                            synchronized (cachedCandidates) {
+                                cachedCandidates.add(cachedCandidate);
+                            }
                             progress.incrementAndGet();
                             continue;
                         }
-                        // Caso 1: non trovato, calcolo e controllo
-                        List<Integer> results = new ArrayList<>();
-                        boolean isValid = processCombination(opCombo, negPattern, revPattern, functionList, results);
 
-                        if (isValid) {
+                        // Calcola nuovo candidato
+                        List<Integer> results = new ArrayList<>();
+                        Set<Integer> commonIndices = processCombination(
+                            opCombo, negPattern, revPattern, functionList, results
+                        );
+
+                        if (commonIndices != null && !commonIndices.isEmpty()) {
                             Map<String, Object> cand = buildCandidate(
-                                    opCombo, negPattern, revPattern, functionNames, results
+                                opCombo, negPattern, revPattern, functionNames, results, commonIndices
                             );
-                            addCandidateToMap(cand);
-                            operationCache.put(keyHash, cand);
+                            
+                            synchronized (operationCache) {
+                                operationCache.put(key, cand);
+                            }
+                            
                             synchronized (cachedCandidates) {
                                 cachedCandidates.add(cand);
                             }
                         } else {
-                            // Salva nella cache come NON valido (sentinella)
-                            operationCache.put(keyHash, INVALID_CANDIDATE);
+                            // Segna come non valido
+                            synchronized (operationCache) {
+                                operationCache.put(key, INVALID_CANDIDATE);
+                            }
                         }
 
                         int current = progress.incrementAndGet();
@@ -279,11 +323,7 @@ public class ByteScrambler {
                     }
                 }
             }
-            synchronized (cachedCandidates) {
-                if (!cachedCandidates.isEmpty()) {
-                    flushCachedCandidates();
-                }
-            }
+            flushCachedCandidates();
         }
 
         private void flushCachedCandidates() {
@@ -295,7 +335,7 @@ public class ByteScrambler {
             }
         }
 
-        private boolean processCombination(List<Integer> opCombo, List<Boolean> negPattern,
+        private Set<Integer> processCombination(List<Integer> opCombo, List<Boolean> negPattern,
                                           List<Boolean> revPattern, List<BinaryOperator<Integer>> functionList,
                                           List<Integer> results) {
             List<BinaryOperator<Integer>> ops = new ArrayList<>();
@@ -348,64 +388,32 @@ public class ByteScrambler {
             }
 
             Set<Integer> uniqueResults = new HashSet<>(results);
-            return valid && commonIndices != null && !commonIndices.isEmpty() && uniqueResults.size() > 1;
+            return (valid && commonIndices != null && !commonIndices.isEmpty() && uniqueResults.size() > 1) 
+                    ? commonIndices 
+                    : null;
         }
 
         private Map<String, Object> buildCandidate(List<Integer> opCombo, List<Boolean> negPattern,
                                                    List<Boolean> revPattern, List<String> functionNames,
-                                                   List<Integer> results) {
+                                                   List<Integer> results, Set<Integer> commonIndices) {
             Map<String, Object> cand = new HashMap<>();
             cand.put("operands", operandIndices.clone());
             cand.put("negations", new ArrayList<>(negPattern));
             cand.put("reverses", new ArrayList<>(revPattern));
             cand.put("results", new ArrayList<>(results));
+            cand.put("common_indices", new HashSet<>(commonIndices));
 
             List<String> opNames = new ArrayList<>();
             for (int idx : opCombo) {
                 opNames.add(functionNames.get(idx));
             }
             cand.put("ops", opNames);
-
-            Set<Integer> commonIndices = new HashSet<>();
-            for (int[] dump : dumps) {
-                Set<Integer> currentMatches = new HashSet<>();
-                for (int k = 0; k < dump.length; k++) {
-                    boolean isOperand = false;
-                    for (int idx : operandIndices) {
-                        if (k == idx) {
-                            isOperand = true;
-                            break;
-                        }
-                    }
-                    if (!isOperand && dump[k] == results.get(dumps.indexOf(dump))) {
-                        currentMatches.add(k);
-                    }
-                }
-                if (commonIndices.isEmpty()) {
-                    commonIndices.addAll(currentMatches);
-                } else {
-                    commonIndices.retainAll(currentMatches);
-                }
-            }
-
-            if (!commonIndices.isEmpty()) {
-                cand.put("result_index", Collections.min(commonIndices));
-            }
             return cand;
         }
 
         private void addCandidateToMap(Map<String, Object> cand) {
-            if (cand.containsKey("result_index")) {
-                int resultIdx = (Integer) cand.get("result_index");
-                candidateByResult
-                        .computeIfAbsent(resultIdx, k -> Collections.synchronizedList(new ArrayList<>()))
-                        .add(cand);
-            }
-        }
-
-        private void addCachedCandidate(Map<String, Object> cand) {
-            if (cand.containsKey("result_index")) {
-                int resultIdx = (Integer) cand.get("result_index");
+            Set<Integer> commonIndices = (Set<Integer>) cand.get("common_indices");
+            for (int resultIdx : commonIndices) {
                 candidateByResult
                         .computeIfAbsent(resultIdx, k -> Collections.synchronizedList(new ArrayList<>()))
                         .add(cand);

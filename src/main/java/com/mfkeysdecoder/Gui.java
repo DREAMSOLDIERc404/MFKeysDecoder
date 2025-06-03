@@ -279,7 +279,6 @@ public class Gui extends JFrame {
         scrollPane.setPreferredSize(new Dimension(400, 500));
         add(scrollPane, BorderLayout.EAST);
 
-        // Custom renderer per colonne IDXRisultato e Operazione SOLO per HiddenXORFinder
         candidateTable.getColumnModel().getColumn(1).setCellRenderer(new HtmlCellRenderer());
         candidateTable.getColumnModel().getColumn(2).setCellRenderer(new HtmlCellRenderer());
 
@@ -291,7 +290,6 @@ public class Gui extends JFrame {
         });
     }
 
-    // Custom cell renderer per la colonna "IDXRisultato" e "Operazione" con HTML, per colorare la chiave
     private class HtmlCellRenderer extends DefaultTableCellRenderer {
         @Override
         public Component getTableCellRendererComponent(JTable table, Object value,
@@ -352,16 +350,13 @@ public class Gui extends JFrame {
                 List<Integer> results = (List<Integer>) cand.get("results");
                 if (results == null) continue;
 
-                // Calcola la chiave (valore)
                 Integer keyVal = HiddenXORFinder.getKeyFromIndex(resultIndex);
                 String chiaveHex = keyVal != null ? String.format("%02X", keyVal) : String.format("%02X", resultIndex);
 
-                // Visualizza Operazione come: <byte1> XOR <byte2> = <chiave> (chiave in rosso)
                 String byte1 = String.format("%02X", currentDump[operands[0]]);
                 String byte2 = String.format("%02X", currentDump[operands[1]]);
                 String operazioneStr = String.format("%s XOR %s = <span style='color:red;font-weight:bold;'>%s</span>", byte1, byte2, chiaveHex);
 
-                // La chiave in IDXRisultato, in rosso
                 tableModel.addRow(new Object[]{
                     Arrays.toString(operands),
                     "<html><span style='color:red;font-weight:bold;'>" + chiaveHex + "</span></html>",
@@ -372,7 +367,6 @@ public class Gui extends JFrame {
             return;
         }
 
-        // Altri algoritmi: ByteScrambler
         List<Map<String, Object>> candidates = getCurrentCandidates();
         if (candidates == null) return;
         int currentDumpIndex = tabbedPane.getSelectedIndex();
@@ -382,22 +376,27 @@ public class Gui extends JFrame {
             int[] operands = (int[]) cand.get("operands");
             List<Boolean> negations = (List<Boolean>) cand.get("negations");
             List<Boolean> reverses = (List<Boolean>) cand.get("reverses");
-            int resultIndex = (int) cand.get("result_index");
             List<String> ops = (List<String>) cand.get("ops");
             List<Integer> results = (List<Integer>) cand.get("results");
             if (results == null) continue;
+            
+            int resultValue = results.get(currentDumpIndex);
             StringBuilder opBuilder = new StringBuilder();
             for (int i = 0; i < operands.length; i++) {
                 if (i > 0) opBuilder.append(" ").append(ops.isEmpty() ? "" : ops.get(i - 1)).append(" ");
                 if (negations != null && i < negations.size() && negations.get(i)) {
                     opBuilder.append("!");
                 }
+                if (reverses != null && i < reverses.size() && reverses.get(i)) {
+                    opBuilder.append("~");
+                }
                 opBuilder.append(String.format("%02X", currentDump[operands[i]]));
             }
-            opBuilder.append(" = ").append(String.format("%02X", results.get(currentDumpIndex)));
+            opBuilder.append(" = ").append(String.format("%02X", resultValue));
+            
             tableModel.addRow(new Object[]{
                 Arrays.toString(operands),
-                resultIndex,
+                globalSelection.selectedByteIndex,  // Usa l'indice selezionato invece del result_index
                 opBuilder.toString()
             });
         }
@@ -423,12 +422,21 @@ public class Gui extends JFrame {
         }
         return -1;
     }
+    
     private boolean candidateEquals(Map<String, Object> a, Map<String, Object> b) {
         if (a == b) return true;
         if (a == null || b == null) return false;
-        return Arrays.equals((int[]) a.get("operands"), (int[]) b.get("operands"))
-                && Objects.equals(a.get("ops"), b.get("ops"))
-                && Objects.equals(a.get("result_index"), b.get("result_index"));
+        
+        if (!Arrays.equals((int[]) a.get("operands"), (int[]) b.get("operands"))) {
+            return false;
+        }
+
+        if ("ByteScrambler".equals(selectedAlgorithm)) {
+            return Objects.equals(a.get("ops"), b.get("ops"))
+                    && Objects.equals(a.get("negations"), b.get("negations"))
+                    && Objects.equals(a.get("reverses"), b.get("reverses"));
+        }
+        return true;
     }
 
     public void start() {
