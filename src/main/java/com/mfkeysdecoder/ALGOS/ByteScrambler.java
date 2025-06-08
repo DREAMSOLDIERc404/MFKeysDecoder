@@ -249,81 +249,81 @@ public class ByteScrambler {
 
         @Override
         public void run() {
-            List<String> functionNames = new ArrayList<>(candidateFunctions.keySet());
-            List<BinaryOperator<Integer>> functionList = new ArrayList<>(candidateFunctions.values());
-            int numOps = numOperands - 1;
+            try {
+                List<String> functionNames = new ArrayList<>(candidateFunctions.keySet());
+                List<BinaryOperator<Integer>> functionList = new ArrayList<>(candidateFunctions.values());
+                int numOps = numOperands - 1;
 
-            List<List<Integer>> opCombos = (numOps == 0)
-                    ? Collections.singletonList(Collections.emptyList())
-                    : product(functionNames.size(), numOps);
+                List<List<Integer>> opCombos = (numOps == 0)
+                        ? Collections.singletonList(Collections.emptyList())
+                        : product(functionNames.size(), numOps);
 
-            for (List<Integer> opCombo : opCombos) {
-                List<List<Boolean>> negationPatterns = productBoolean(numOperands);
-                for (List<Boolean> negPattern : negationPatterns) {
-                    List<List<Boolean>> reversePatterns =
-                            (numOperands == 1)
-                                    ? productBoolean(1)
-                                    : productFixedFirstTrue(numOperands);
+                for (List<Integer> opCombo : opCombos) {
+                    List<List<Boolean>> negationPatterns = productBoolean(numOperands);
+                    for (List<Boolean> negPattern : negationPatterns) {
+                        // Modifica: usa productBoolean per tutti gli operandi, inclusi il primo
+                        List<List<Boolean>> reversePatterns = productBoolean(numOperands);
+                        for (List<Boolean> revPattern : reversePatterns) {
+                            CacheKey key = new CacheKey(
+                                operandIndices, 
+                                opCombo, 
+                                negPattern, 
+                                revPattern
+                            );
 
-                    for (List<Boolean> revPattern : reversePatterns) {
-                        CacheKey key = new CacheKey(
-                            operandIndices, 
-                            opCombo, 
-                            negPattern, 
-                            revPattern
-                        );
+                            Map<String, Object> cachedCandidate;
+                            synchronized (operationCache) {
+                                cachedCandidate = operationCache.get(key);
+                            }
 
-                        Map<String, Object> cachedCandidate;
-                        synchronized (operationCache) {
-                            cachedCandidate = operationCache.get(key);
-                        }
-
-                        if (cachedCandidate != null) {
-                            if (cachedCandidate == INVALID_CANDIDATE) {
+                            if (cachedCandidate != null) {
+                                if (cachedCandidate == INVALID_CANDIDATE) {
+                                    progress.incrementAndGet();
+                                    continue;
+                                }
+                                // Aggiungi alla lista temporanea
+                                synchronized (cachedCandidates) {
+                                    cachedCandidates.add(cachedCandidate);
+                                }
                                 progress.incrementAndGet();
                                 continue;
                             }
-                            // Aggiungi alla lista temporanea
-                            synchronized (cachedCandidates) {
-                                cachedCandidates.add(cachedCandidate);
-                            }
-                            progress.incrementAndGet();
-                            continue;
-                        }
 
-                        // Calcola nuovo candidato
-                        List<Integer> results = new ArrayList<>();
-                        Set<Integer> commonIndices = processCombination(
-                            opCombo, negPattern, revPattern, functionList, results
-                        );
-
-                        if (commonIndices != null && !commonIndices.isEmpty()) {
-                            Map<String, Object> cand = buildCandidate(
-                                opCombo, negPattern, revPattern, functionNames, results, commonIndices
+                            // Calcola nuovo candidato
+                            List<Integer> results = new ArrayList<>();
+                            Set<Integer> commonIndices = processCombination(
+                                opCombo, negPattern, revPattern, functionList, results
                             );
-                            
-                            synchronized (operationCache) {
-                                operationCache.put(key, cand);
-                            }
-                            
-                            synchronized (cachedCandidates) {
-                                cachedCandidates.add(cand);
-                            }
-                        } else {
-                            // Segna come non valido
-                            synchronized (operationCache) {
-                                operationCache.put(key, INVALID_CANDIDATE);
-                            }
-                        }
 
-                        int current = progress.incrementAndGet();
-                        if (current % 100 == 0) {
-                            progressCallback.update(current, total);
+                            if (commonIndices != null && !commonIndices.isEmpty()) {
+                                Map<String, Object> cand = buildCandidate(
+                                    opCombo, negPattern, revPattern, functionNames, results, commonIndices
+                                );
+                                
+                                synchronized (operationCache) {
+                                    operationCache.put(key, cand);
+                                }
+                                
+                                synchronized (cachedCandidates) {
+                                    cachedCandidates.add(cand);
+                                }
+                            } else {
+                                // Segna come non valido
+                                synchronized (operationCache) {
+                                    operationCache.put(key, INVALID_CANDIDATE);
+                                }
+                            }
+
+                            int current = progress.incrementAndGet();
+                            if (current % 100 == 0) {
+                                progressCallback.update(current, total);
+                            }
                         }
                     }
                 }
+            } finally {
+                flushCachedCandidates();
             }
-            flushCachedCandidates();
         }
 
         private void flushCachedCandidates() {
