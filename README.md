@@ -97,6 +97,7 @@ Sentiti libero di utilizzarlo, modificarlo e condividerlo!
 
 ## DA AGGIUNGERE
 
+- Negare e invertire i result
 - Aggiungi UIDScramble
 - Aggiusta la percentuale, non deve andare in overflow
   - Metti a posto brach di find xor con i dump lungho 
