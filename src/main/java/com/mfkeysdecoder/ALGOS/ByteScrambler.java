@@ -44,7 +44,8 @@ public class ByteScrambler {
     // Limite massimo per la cache delle operazioni (configurabile)
     private static int MAX_CACHED_OPERATIONS = 1_500_000;
 
-    // Sentinella per candidati non validi
+    // Sentinella per candidati non validi (attualmente non utilizzata direttamente)
+    @SuppressWarnings("unused")
     private static final Map<String, Object> INVALID_CANDIDATE =
             Collections.singletonMap("valid", false);
 
@@ -110,7 +111,7 @@ public class ByteScrambler {
         return result;
     }
 
-    // result: Map<result_index, List<Map<String, Object>>>
+    // result: Map del risultato -> Lista di candidati (mappa contenente le info della combinazione)
     public static Map<Integer, List<Map<String, Object>>> searchCandidates(
             List<int[]> dumps,
             int maxOperands,
@@ -120,6 +121,7 @@ public class ByteScrambler {
         int n = dumps.get(0).length;
         Map<Integer, List<Map<String, Object>>> candidateByResult = new ConcurrentHashMap<>();
         AtomicInteger progress = new AtomicInteger(0);
+        // Il calcolo totale tiene conto solo delle combinazioni valide
         long total = calculateTotalCombinations(n, maxOperands);
 
         if (total == Long.MAX_VALUE) {
@@ -132,7 +134,8 @@ public class ByteScrambler {
 
         for (int numOperands = 1; numOperands <= maxOperands; numOperands++) {
             final int currentNumOperands = numOperands;
-            List<int[]> operandCombinations = combinations(n, numOperands);
+            // Genera solo le combinazioni valide (che includono almeno un indice da 0 a 15)
+            List<int[]> operandCombinations = combinationsValid(n, numOperands);
 
             for (int[] operandIndices : operandCombinations) {
                 futures.add(executor.submit(new CandidateTask(
@@ -167,6 +170,72 @@ public class ByteScrambler {
         return deduped;
     }
 
+    // Calcola il totale delle operazioni basate sulle combinazioni valide: ogni combinazione
+    // deve contenere almeno un indice < 16. Se n >= 16, il numero di combinazioni non valide (cioè
+    // quelle prive di indici nel range [0,15]) è binomial(n - 16, r) (se possibile).
+    private static long calculateTotalCombinations(int n, int maxOperands) {
+        long total = 0;
+        for (int numOperands = 1; numOperands <= maxOperands; numOperands++) {
+            long allComb = binomial(n, numOperands);
+            long invalidComb = 0;
+            if (n >= 16 && n - 16 >= numOperands) {
+                invalidComb = binomial(n - 16, numOperands);
+            }
+            long validComb = allComb - invalidComb; // solo le combinazioni con almeno un indice < 16
+
+            long negationComb = 1L << numOperands;
+            long reverseComb = (numOperands == 1) ? 2 : 1L << (numOperands - 1);
+            long opComb = (numOperands > 1) ? (long) Math.pow(candidateFunctions.size(), numOperands - 1) : 1;
+
+            long product = safeMultiply(validComb, negationComb);
+            if (product < 0) return Long.MAX_VALUE;
+            product = safeMultiply(product, reverseComb);
+            if (product < 0) return Long.MAX_VALUE;
+            product = safeMultiply(product, opComb);
+            if (product < 0) return Long.MAX_VALUE;
+
+            if (Long.MAX_VALUE - total < product) {
+                return Long.MAX_VALUE;
+            }
+            total += product;
+        }
+        return total;
+    }
+
+    private static long safeMultiply(long a, long b) {
+        if (a != 0 && b != 0 && (a * b) / a != b) {
+            return -1;
+        }
+        return a * b;
+    }
+
+    // Genera solo combinazioni valide, ovvero quelle che contengono almeno un indice < 16
+    private static List<int[]> combinationsValid(int n, int r) {
+        List<int[]> result = new ArrayList<>();
+        combinationHelperValid(result, new int[r], 0, n - 1, 0);
+        return result;
+    }
+
+    private static void combinationHelperValid(List<int[]> result, int[] data, int start, int end, int index) {
+        if (index == data.length) {
+            // In questo punto, tutti gli elementi sono già validi (< 16)
+            result.add(data.clone());
+            return;
+        }
+        // Se il prossimo valore che possiamo aggiungere è >= 16,
+        // allora anche tutti quelli successivi lo sono, per definizione dell'ordinamento.
+        if (start >= 16) {
+            return;
+        }
+        for (int i = start; i <= end && end - i + 1 >= data.length - index; i++) {
+            // Se i è maggiore o uguale a 16, non esploriamo ulteriormente poiché
+            // sappiamo che tutti i valori successivi saranno >= 16.
+            if (i >= 16) break;
+            data[index] = i;
+            combinationHelperValid(result, data, i + 1, end, index + 1);
+        }
+    }
+
     private static List<Map<String, Object>> deduplicate(List<Map<String, Object>> list) {
         List<Map<String, Object>> result = new ArrayList<>();
         for (Map<String, Object> c : list) {
@@ -191,39 +260,94 @@ public class ByteScrambler {
                 && Objects.equals(a.get("reverses"), b.get("reverses"));
     }
 
-    private static long calculateTotalCombinations(int n, int maxOperands) {
-        long total = 0;
-        for (int numOperands = 1; numOperands <= maxOperands; numOperands++) {
-            long combOperands = binomial(n, numOperands);
-            long negationComb = 1L << numOperands;
-            long reverseComb = (numOperands == 1) ? 2 : 1L << (numOperands - 1);
-            long opComb = (numOperands > 1) ? (long) Math.pow(candidateFunctions.size(), numOperands - 1) : 1;
-
-            long product = safeMultiply(combOperands, negationComb);
-            if (product < 0) return Long.MAX_VALUE;
-
-            product = safeMultiply(product, reverseComb);
-            if (product < 0) return Long.MAX_VALUE;
-
-            product = safeMultiply(product, opComb);
-            if (product < 0) return Long.MAX_VALUE;
-
-            if (Long.MAX_VALUE - total < product) {
-                return Long.MAX_VALUE;
-            }
-            total += product;
+    private static long binomial(int n, int k) {
+        long res = 1;
+        for (int i = 1; i <= k; i++) {
+            res = res * (n - i + 1) / i;
         }
-        return total;
+        return res;
     }
 
-    private static long safeMultiply(long a, long b) {
-        if (a != 0 && b != 0 && (a * b) / a != b) {
-            return -1;
-        }
-        return a * b;
+    // Metodi utilitari segnalati come "non usati" dal compilatore 
+    @SuppressWarnings("unused")
+    private static List<List<Integer>> product(int base, int length) {
+        List<List<Integer>> results = new ArrayList<>();
+        productHelper(results, new ArrayList<>(), base, length);
+        return results;
     }
 
-    static class CandidateTask implements Runnable {
+    @SuppressWarnings("unused")
+    private static void productHelper(List<List<Integer>> results, List<Integer> current, int base, int length) {
+        if (current.size() == length) {
+            results.add(new ArrayList<>(current));
+            return;
+        }
+        for (int i = 0; i < base; i++) {
+            current.add(i);
+            productHelper(results, current, base, length);
+            current.remove(current.size() - 1);
+        }
+    }
+
+    @SuppressWarnings("unused")
+    private static List<List<Boolean>> productBoolean(int length) {
+        List<List<Boolean>> results = new ArrayList<>();
+        productBooleanHelper(results, new ArrayList<>(), length);
+        return results;
+    }
+
+    @SuppressWarnings("unused")
+    private static void productBooleanHelper(List<List<Boolean>> results, List<Boolean> current, int length) {
+        if (current.size() == length) {
+            results.add(new ArrayList<>(current));
+            return;
+        }
+        current.add(false);
+        productBooleanHelper(results, current, length);
+        current.remove(current.size() - 1);
+        current.add(true);
+        productBooleanHelper(results, current, length);
+        current.remove(current.size() - 1);
+    }
+
+    @SuppressWarnings("unused")
+    private static List<List<Boolean>> productFixedFirstTrue(int length) {
+        List<List<Boolean>> results = new ArrayList<>();
+        if (length < 1) return results;
+        List<Boolean> prefix = new ArrayList<>();
+        prefix.add(true);
+        productFixedFirstTrueHelper(results, prefix, length - 1);
+        return results;
+    }
+
+    @SuppressWarnings("unused")
+    private static void productFixedFirstTrueHelper(List<List<Boolean>> results, List<Boolean> current, int remaining) {
+        if (remaining == 0) {
+            results.add(new ArrayList<>(current));
+            return;
+        }
+        current.add(false);
+        productFixedFirstTrueHelper(results, current, remaining - 1);
+        current.remove(current.size() - 1);
+        current.add(true);
+        productFixedFirstTrueHelper(results, current, remaining - 1);
+        current.remove(current.size() - 1);
+    }
+
+    @SuppressWarnings("unused")
+    private static boolean[] toPrimitive(List<Boolean> list) {
+        boolean[] arr = new boolean[list.size()];
+        for (int i = 0; i < list.size(); i++) arr[i] = list.get(i);
+        return arr;
+    }
+
+    public interface ProgressCallback {
+        void update(long current, long total);
+        default void handleOverflow() {}
+    }
+
+    // La classe CandidateTask è ora una classe annidata statica per essere risolvibile dai metodi statici.
+    private static class CandidateTask implements Runnable {
         private final List<int[]> dumps;
         private final int[] operandIndices;
         private final int numOperands;
@@ -254,6 +378,7 @@ public class ByteScrambler {
                 List<BinaryOperator<Integer>> functionList = new ArrayList<>(candidateFunctions.values());
                 int numOps = numOperands - 1;
 
+                // Se non ci sono operazioni (quando numOperands == 1), usiamo una lista con un elemento vuoto
                 List<List<Integer>> opCombos = (numOps == 0)
                         ? Collections.singletonList(Collections.emptyList())
                         : product(functionNames.size(), numOps);
@@ -261,7 +386,7 @@ public class ByteScrambler {
                 for (List<Integer> opCombo : opCombos) {
                     List<List<Boolean>> negationPatterns = productBoolean(numOperands);
                     for (List<Boolean> negPattern : negationPatterns) {
-                        // Modifica: usa productBoolean per tutti gli operandi, inclusi il primo
+                        // Uso productBoolean per tutti gli operandi, inclusi il primo
                         List<List<Boolean>> reversePatterns = productBoolean(numOperands);
                         for (List<Boolean> revPattern : reversePatterns) {
                             CacheKey key = new CacheKey(
@@ -281,7 +406,7 @@ public class ByteScrambler {
                                     progress.incrementAndGet();
                                     continue;
                                 }
-                                // Aggiungi alla lista temporanea
+                                // Aggiungo alla lista temporanea
                                 synchronized (cachedCandidates) {
                                     cachedCandidates.add(cachedCandidate);
                                 }
@@ -289,16 +414,12 @@ public class ByteScrambler {
                                 continue;
                             }
 
-                            // Calcola nuovo candidato
+                            // Calcolo nuovo candidato
                             List<Integer> results = new ArrayList<>();
-                            Set<Integer> commonIndices = processCombination(
-                                opCombo, negPattern, revPattern, functionList, results
-                            );
+                            Set<Integer> commonIndices = processCombination(opCombo, negPattern, revPattern, functionList, results);
 
                             if (commonIndices != null && !commonIndices.isEmpty()) {
-                                Map<String, Object> cand = buildCandidate(
-                                    opCombo, negPattern, revPattern, functionNames, results, commonIndices
-                                );
+                                Map<String, Object> cand = buildCandidate(opCombo, negPattern, revPattern, functionNames, results, commonIndices);
                                 
                                 synchronized (operationCache) {
                                     operationCache.put(key, cand);
@@ -308,7 +429,6 @@ public class ByteScrambler {
                                     cachedCandidates.add(cand);
                                 }
                             } else {
-                                // Segna come non valido
                                 synchronized (operationCache) {
                                     operationCache.put(key, INVALID_CANDIDATE);
                                 }
@@ -347,13 +467,7 @@ public class ByteScrambler {
             boolean valid = true;
 
             for (int[] dump : dumps) {
-                int res = evaluateExpression(
-                        dump,
-                        operandIndices,
-                        toPrimitive(negPattern),
-                        toPrimitive(revPattern),
-                        ops
-                );
+                int res = evaluateExpression(dump, operandIndices, toPrimitive(negPattern), toPrimitive(revPattern), ops);
                 results.add(res);
 
                 Set<Integer> currentMatches = new HashSet<>();
@@ -419,101 +533,5 @@ public class ByteScrambler {
                         .add(cand);
             }
         }
-    }
-
-    // Utility methods invariati
-    private static List<int[]> combinations(int n, int r) {
-        List<int[]> result = new ArrayList<>();
-        combinationHelper(result, new int[r], 0, n - 1, 0);
-        return result;
-    }
-
-    private static void combinationHelper(List<int[]> result, int[] data, int start, int end, int index) {
-        if (index == data.length) {
-            result.add(data.clone());
-            return;
-        }
-        for (int i = start; i <= end && end - i + 1 >= data.length - index; i++) {
-            data[index] = i;
-            combinationHelper(result, data, i + 1, end, index + 1);
-        }
-    }
-
-    private static long binomial(int n, int k) {
-        long res = 1;
-        for (int i = 1; i <= k; i++) {
-            res = res * (n - i + 1) / i;
-        }
-        return res;
-    }
-
-    private static List<List<Integer>> product(int base, int length) {
-        List<List<Integer>> results = new ArrayList<>();
-        productHelper(results, new ArrayList<>(), base, length);
-        return results;
-    }
-
-    private static void productHelper(List<List<Integer>> results, List<Integer> current, int base, int length) {
-        if (current.size() == length) {
-            results.add(new ArrayList<>(current));
-            return;
-        }
-        for (int i = 0; i < base; i++) {
-            current.add(i);
-            productHelper(results, current, base, length);
-            current.remove(current.size() - 1);
-        }
-    }
-
-    private static List<List<Boolean>> productBoolean(int length) {
-        List<List<Boolean>> results = new ArrayList<>();
-        productBooleanHelper(results, new ArrayList<>(), length);
-        return results;
-    }
-
-    private static void productBooleanHelper(List<List<Boolean>> results, List<Boolean> current, int length) {
-        if (current.size() == length) {
-            results.add(new ArrayList<>(current));
-            return;
-        }
-        current.add(false);
-        productBooleanHelper(results, current, length);
-        current.remove(current.size() - 1);
-        current.add(true);
-        productBooleanHelper(results, current, length);
-        current.remove(current.size() - 1);
-    }
-
-    private static List<List<Boolean>> productFixedFirstTrue(int length) {
-        List<List<Boolean>> results = new ArrayList<>();
-        if (length < 1) return results;
-        List<Boolean> prefix = new ArrayList<>();
-        prefix.add(true);
-        productFixedFirstTrueHelper(results, prefix, length - 1);
-        return results;
-    }
-
-    private static void productFixedFirstTrueHelper(List<List<Boolean>> results, List<Boolean> current, int remaining) {
-        if (remaining == 0) {
-            results.add(new ArrayList<>(current));
-            return;
-        }
-        current.add(false);
-        productFixedFirstTrueHelper(results, current, remaining - 1);
-        current.remove(current.size() - 1);
-        current.add(true);
-        productFixedFirstTrueHelper(results, current, remaining - 1);
-        current.remove(current.size() - 1);
-    }
-
-    private static boolean[] toPrimitive(List<Boolean> list) {
-        boolean[] arr = new boolean[list.size()];
-        for (int i = 0; i < list.size(); i++) arr[i] = list.get(i);
-        return arr;
-    }
-
-    public interface ProgressCallback {
-        void update(long current, long total);
-        default void handleOverflow() {}
     }
 }
