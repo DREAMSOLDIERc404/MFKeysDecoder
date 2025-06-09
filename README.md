@@ -97,6 +97,7 @@ Sentiti libero di utilizzarlo, modificarlo e condividerlo!
 
 ## DA AGGIUNGERE
 
+- Aggiungi UIDScramble
 - Aggiusta la percentuale, non deve andare in overflow
   - Metti a posto brach di find xor con i dump lungho 
 - Salva i candidati su file sia per XORFINDER che per BYTESCRAMBLER
