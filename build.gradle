@@ -18,6 +18,7 @@ run {
 
     jvmArgs = [
          
-            //"-Xmx8g"
+            "-Xmx8g",
+            "-Xms4g"
     ]
 }
